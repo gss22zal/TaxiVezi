@@ -9,10 +9,28 @@ use App\Http\Controllers\Admin\AdminOrdersController;
 use App\Http\Controllers\Admin\AdminCancelledOrdersController;
 use App\Http\Controllers\Admin\AdminTariffsController;
 use App\Http\Controllers\Admin\AdminCarsController;
+use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AdminReviewsController;
+use App\Http\Controllers\Admin\AdminSettingsController;
 use App\Http\Controllers\Driver\CarController;
+use App\Http\Controllers\Dispatcher\DispatcherReviewsController;
 use App\Http\Controllers\Api\OrderStatsController;
 use App\Http\Controllers\Api\AvailableOrdersController;
-use Illuminate\Foundation\Application;
+use \App\Http\Controllers\Api\AcceptOrderController;
+use \App\Http\Controllers\Api\CompleteOrderController;
+use \App\Http\Controllers\Api\StartTripController;
+use \App\Http\Controllers\Api\ArrivedAtCustomerController;
+use \App\Http\Controllers\Api\DriverCancelOrderController;
+use \App\Http\Controllers\Api\DriverActiveOrderController;
+use \App\Http\Controllers\Api\DriverProfileController;
+use \App\Http\Controllers\Api\DriverOrderHistoryController;
+use \App\Http\Controllers\Api\DriverStatusController;
+use \App\Http\Controllers\Api\DispatcherOrdersController;
+use \App\Http\Controllers\Api\DispatcherCancelledOrdersController;
+use \App\Http\Controllers\Api\DriverStatusesController;
+use \App\Http\Controllers\Api\PassengerOrderController;
+use \App\Http\Controllers\Api\PassengerOrderHistoryController;
+use \App\Http\Controllers\Api\ReviewController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -25,55 +43,58 @@ Route::get('/api/order-stats', OrderStatsController::class)->middleware('web');
 Route::get('/api/available-orders', AvailableOrdersController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API endpoint для принятия заказа водителем
-Route::post('/api/orders/{order}/accept', \App\Http\Controllers\Api\AcceptOrderController::class)->middleware('auth');
+Route::post('/api/orders/{order}/accept', AcceptOrderController::class)->middleware('auth');
 
 // API endpoint для завершения заказа водителем
-Route::post('/api/orders/{order}/complete', \App\Http\Controllers\Api\CompleteOrderController::class)->middleware('auth');
+Route::post('/api/orders/{order}/complete', CompleteOrderController::class)->middleware('auth');
 
 // API endpoint для начала поездки (пассажир сел в такси)
-Route::post('/api/orders/{order}/start-trip', \App\Http\Controllers\Api\StartTripController::class)->middleware('auth');
+Route::post('/api/orders/{order}/start-trip', StartTripController::class)->middleware('auth');
 
 // API endpoint для отметки "у клиента" (водитель прибыл)
-Route::post('/api/orders/{order}/arrived', \App\Http\Controllers\Api\ArrivedAtCustomerController::class)->middleware('auth');
+Route::post('/api/orders/{order}/arrived', ArrivedAtCustomerController::class)->middleware('auth');
 
 // API endpoint для отмены заказа водителем
-Route::post('/api/orders/{order}/driver-cancel', \App\Http\Controllers\Api\DriverCancelOrderController::class)->middleware('auth');
+Route::post('/api/orders/{order}/driver-cancel', DriverCancelOrderController::class)->middleware('auth');
 
 // API endpoint для активного заказа водителя
-Route::get('/api/driver/active-order', \App\Http\Controllers\Api\DriverActiveOrderController::class)->middleware(['auth', 'api.rate_limit']);
+Route::get('/api/driver/active-order', DriverActiveOrderController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API endpoint для профиля водителя
-Route::get('/api/driver/profile', \App\Http\Controllers\Api\DriverProfileController::class)->middleware(['auth', 'api.rate_limit']);
+Route::get('/api/driver/profile', DriverProfileController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API endpoint для истории заказов водителя (завершённые поездки)
-Route::get('/api/driver/orders/history', \App\Http\Controllers\Api\DriverOrderHistoryController::class)->middleware(['auth', 'api.rate_limit']);
+Route::get('/api/driver/orders/history', DriverOrderHistoryController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API endpoint для статуса водителя (онлайн/офлайн/занят)
-Route::post('/api/driver/status', \App\Http\Controllers\Api\DriverStatusController::class)->middleware('auth');
+Route::post('/api/driver/status', DriverStatusController::class)->middleware('auth');
 
 // API endpoint для заказов диспетчера (real-time)
-Route::get('/api/dispatcher/orders', \App\Http\Controllers\Api\DispatcherOrdersController::class)->middleware(['auth', 'api.rate_limit']);
+Route::get('/api/dispatcher/orders', DispatcherOrdersController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API endpoint для отменённых заказов диспетчера
-Route::get('/api/dispatcher/orders/cancelled', \App\Http\Controllers\Api\DispatcherCancelledOrdersController::class)->middleware(['auth', 'api.rate_limit']);
+Route::get('/api/dispatcher/orders/cancelled', DispatcherCancelledOrdersController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API endpoint для статусов водителей
-Route::get('/api/driver-statuses', \App\Http\Controllers\Api\DriverStatusesController::class)->middleware(['auth', 'api.rate_limit']);
+Route::get('/api/driver-statuses', DriverStatusesController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API для пассажира - активный заказ
-Route::get('/api/passenger/active-order', [\App\Http\Controllers\Api\PassengerOrderController::class, 'activeOrder'])->middleware('auth');
+Route::get('/api/passenger/active-order', [PassengerOrderController::class, 'activeOrder'])->middleware('auth');
+
+// API для пассажира - история заказов
+Route::get('/api/passenger/orders/history', PassengerOrderHistoryController::class)->middleware(['auth', 'api.rate_limit']);
 
 // API для пассажира - отмена заказа
-Route::post('/api/passenger/orders/{order}/cancel', [\App\Http\Controllers\Api\PassengerOrderController::class, 'cancelOrder'])->middleware('auth');
+Route::post('/api/passenger/orders/{order}/cancel', [PassengerOrderController::class, 'cancelOrder'])->middleware('auth');
 
 // API для пассажира - оставить отзыв
-Route::post('/api/passenger/orders/{order}/review', [\App\Http\Controllers\Api\ReviewController::class, 'store'])->middleware('auth');
+Route::post('/api/passenger/orders/{order}/review', [ReviewController::class, 'store'])->middleware('auth');
 
 // API для проверки отзыва на заказ
-Route::get('/api/passenger/orders/{order}/review/check', [\App\Http\Controllers\Api\ReviewController::class, 'checkReview'])->middleware('auth');
+Route::get('/api/passenger/orders/{order}/review/check', [ReviewController::class, 'checkReview'])->middleware('auth');
 
 // API для получения отзывов водителя
-Route::get('/api/driver/{driverId}/reviews', [\App\Http\Controllers\Api\ReviewController::class, 'driverReviews']);
+Route::get('/api/driver/{driverId}/reviews', [ReviewController::class, 'driverReviews']);
 
 Route::get('/', function () {
     return Inertia::render('Landing');
@@ -122,7 +143,7 @@ Route::middleware(['auth', 'role:dispatcher'])->group(function () {
         return Inertia::render('Dispatcher/Map');
     })->name('dispatcher.map');
 
-    Route::get('/dispatcher/reviews', [App\Http\Controllers\Dispatcher\DispatcherReviewsController::class, 'index'])->name('dispatcher.reviews');
+    Route::get('/dispatcher/reviews', [DispatcherReviewsController::class, 'index'])->name('dispatcher.reviews');
 
     Route::get('/dispatcher', function () {
         return redirect()->route('dispatcher.orders');
@@ -131,7 +152,7 @@ Route::middleware(['auth', 'role:dispatcher'])->group(function () {
 
 // Админ-панель - только для админов
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
-    Route::get('/', [App\Http\Controllers\Admin\AdminDashboardController::class, 'index'])->name('admin.dashboard');
+    Route::get('/', [AdminDashboardController::class, 'index'])->name('admin.dashboard');
 
     Route::get('/users/drivers', [AdminUsersController::class, 'drivers'])->name('admin.users.drivers');
     Route::get('/users/passengers', [AdminUsersController::class, 'passengers'])->name('admin.users.passengers');
@@ -173,8 +194,8 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
     Route::delete('/tariffs/{tariff}', [AdminTariffsController::class, 'destroy'])->name('admin.tariffs.destroy');
     Route::post('/tariffs/{tariff}/toggle', [AdminTariffsController::class, 'toggleActive'])->name('admin.tariffs.toggle');
 
-    Route::get('/settings', [App\Http\Controllers\Admin\AdminSettingsController::class, 'index'])->name('admin.settings');
-    Route::post('/settings', [App\Http\Controllers\Admin\AdminSettingsController::class, 'update'])->name('admin.settings.update');
+    Route::get('/settings', [AdminSettingsController::class, 'index'])->name('admin.settings');
+    Route::post('/settings', [AdminSettingsController::class, 'update'])->name('admin.settings.update');
 
     Route::get('/roles', function () {
         return Inertia::render('Admin/Roles');
@@ -192,7 +213,7 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
         return Inertia::render('Admin/Logs');
     })->name('admin.logs');
 
-    Route::get('/reviews', [App\Http\Controllers\Admin\AdminReviewsController::class, 'index'])->name('admin.reviews');
+    Route::get('/reviews', [AdminReviewsController::class, 'index'])->name('admin.reviews');
 });
 
 Route::middleware('auth')->group(function () {

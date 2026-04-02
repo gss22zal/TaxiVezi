@@ -218,10 +218,9 @@ const loadActiveOrder = async () => {
       const data = await response.json()
 
       if (data.order) {
-        // Если заказ уже завершён - показываем сообщение и сбрасываем
+        // Если заказ уже завершён - сбрасываем без уведомления
         if (data.order.status === 'completed') {
           console.log('Заказ уже завершён, сбрасываем')
-          alert('Поездка завершена! Спасибо за работу.')
           activeOrder.value = null
           driverStatus.value = 'free'
           return
@@ -519,6 +518,12 @@ const stats = ref({
 // История поездок
 const tripHistory = ref([])
 const tripHistoryLoading = ref(true)
+const tripPagination = ref({
+  current_page: 1,
+  per_page: 10,
+  total: 0,
+  last_page: 1
+})
 const tripStats = ref({
   total_trips: 0,
   total_earnings: 0,
@@ -527,10 +532,11 @@ const tripStats = ref({
   today_earnings: 0
 })
 
-// Загрузка истории поездок
-const loadTripHistory = async () => {
+// Загрузка истории поездок с пагинацией
+const loadTripHistory = async (page = 1) => {
+  tripHistoryLoading.value = true
   try {
-    const response = await fetch('/api/driver/orders/history', {
+    const response = await fetch(`/api/driver/orders/history?page=${page}`, {
       headers: {
         'Accept': 'application/json',
         'X-Requested-With': 'XMLHttpRequest'
@@ -539,13 +545,70 @@ const loadTripHistory = async () => {
 
     if (response.ok) {
       const data = await response.json()
+      console.log('Trip history loaded:', data.stats)
       tripHistory.value = data.orders || []
       tripStats.value = data.stats || tripStats.value
+      tripPagination.value = data.pagination || {
+        current_page: 1,
+        per_page: 10,
+        total: 0,
+        last_page: 1
+      }
+      
+      // Обновляем статистику за сегодня из API
+      if (data.stats) {
+        console.log('Updating stats:', {
+          trips: data.stats.today_trips,
+          earnings: data.stats.today_earnings,
+          distance: data.stats.today_distance
+        })
+        stats.value.trips = data.stats.today_trips || 0
+        stats.value.earnings = Number(data.stats.today_earnings) || 0
+        stats.value.distance = Number(data.stats.today_distance) || 0
+      }
     }
   } catch (e) {
     console.error('Ошибка загрузки истории поездок:', e)
   } finally {
     tripHistoryLoading.value = false
+  }
+}
+
+// Переключение страницы истории
+const changeTripPage = (page) => {
+  if (page >= 1 && page <= tripPagination.value.last_page) {
+    loadTripHistory(page)
+  }
+}
+
+// Скрыть заказ из истории
+const hideFromTripHistory = async (orderId) => {
+  if (!confirm('Удалить этот заказ из истории?')) return
+  
+  try {
+    const response = await fetch(`/api/driver/orders/${orderId}/hide`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    })
+
+    const data = await response.json()
+    console.log('Hide order response:', data)
+    
+    if (response.ok && data.success) {
+      // Удаляем заказ из локального списка
+      tripHistory.value = tripHistory.value.filter(o => o.id !== orderId)
+      // Обновляем пагинацию
+      tripPagination.value.total--
+      tripPagination.value.last_page = Math.ceil(tripPagination.value.total / tripPagination.value.per_page)
+    } else {
+      alert(data.message || 'Ошибка при удалении')
+    }
+  } catch (error) {
+    console.error('Error hiding order:', error)
+    alert('Не удалось удалить заказ')
   }
 }
 
@@ -798,10 +861,12 @@ const completeOrder = async () => {
       // Очищаем активный заказ
       activeOrder.value = null
 
-      // Обновляем статистику
+      // Обновляем статистику правильными значениями с сервера
+      const earnings = result.order?.driver_earnings || result.order?.final_price || orderPrice
+      const distance = result.order?.distance || orderDistance
       stats.value.trips++
-      stats.value.earnings += orderPrice
-      stats.value.distance += orderDistance
+      stats.value.earnings += Number(earnings)
+      stats.value.distance += Number(distance)
 
       // Возвращаем водителя в свободные
       driverStatus.value = 'free'
@@ -1271,16 +1336,7 @@ const toggleTag = (tag) => {
         <div class="mb-3 flex items-center justify-between">
           <div class="text-sm font-medium uppercase text-gray-400">История поездок</div>
           <div class="text-xs text-gray-500">
-            {{ tripStats.total_trips }} поездок
-          </div>
-        </div>
-
-        <!-- Статистика за сегодня -->
-        <div v-if="tripStats.today_trips > 0" class="mb-4 rounded-lg bg-gray-800 p-3">
-          <div class="text-xs text-gray-400 mb-2">Сегодня</div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-white">{{ tripStats.today_trips }} поездок</span>
-            <span class="text-sm font-bold text-yellow-500">{{ tripStats.today_earnings }} ₽</span>
+            {{ tripPagination.total }} поездок
           </div>
         </div>
 
@@ -1291,7 +1347,7 @@ const toggleTag = (tag) => {
         <div v-else-if="tripHistory.length === 0" class="py-4 text-center text-gray-500">
           Нет завершённых поездок
         </div>
-        <div v-else class="space-y-3 max-h-64 overflow-y-auto">
+        <div v-else class="space-y-3">
           <div v-for="trip in tripHistory" :key="trip.id"
             class="flex items-center justify-between border-b border-gray-700 pb-3 last:border-0">
             <div class="flex-1 min-w-0">
@@ -1302,13 +1358,34 @@ const toggleTag = (tag) => {
                 {{ trip.passenger_name ? '• ' + trip.passenger_name : '' }}
               </div>
             </div>
-            <div class="text-right flex-shrink-0 ml-3">
+            <div class="flex flex-col items-end gap-1 ml-3">
               <div class="font-bold text-white">{{ trip.driver_earnings || trip.final_price }} ₽</div>
               <div class="text-xs text-gray-400">
                 {{ trip.completed_at ? new Date(trip.completed_at).toLocaleDateString('ru-RU') : '' }}
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Пагинация -->
+        <div v-if="tripPagination.last_page > 1" class="mt-4 flex items-center justify-center gap-2">
+          <button
+            @click="changeTripPage(tripPagination.current_page - 1)"
+            :disabled="tripPagination.current_page === 1"
+            class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            ← Назад
+          </button>
+          <span class="text-sm text-gray-400">
+            {{ tripPagination.current_page }} / {{ tripPagination.last_page }}
+          </span>
+          <button
+            @click="changeTripPage(tripPagination.current_page + 1)"
+            :disabled="tripPagination.current_page === tripPagination.last_page"
+            class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Вперёд →
+          </button>
         </div>
       </div>
     </div>

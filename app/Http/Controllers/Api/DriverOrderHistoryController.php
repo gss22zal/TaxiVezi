@@ -27,11 +27,36 @@ class DriverOrderHistoryController extends Controller
             return response()->json(['message' => 'Профиль водителя не найден'], 404);
         }
 
-        // Получаем завершённые заказы водителя
-        $orders = Order::where('driver_id', $driver->id)
+        $perPage = 10;
+        $page = $request->input('page', 1);
+
+        // Получаем статистику за последние 24 часа (для учёта часового пояса)
+        $yesterday = now()->subHours(24);
+        
+        $stats = [
+            'today_trips' => Order::where('driver_id', $driver->id)
+                ->where('status', 'completed')
+                ->where('completed_at', '>=', $yesterday)
+                ->count(),
+            'today_earnings' => Order::where('driver_id', $driver->id)
+                ->where('status', 'completed')
+                ->where('completed_at', '>=', $yesterday)
+                ->sum('driver_earnings'),
+            'today_distance' => Order::where('driver_id', $driver->id)
+                ->where('status', 'completed')
+                ->where('completed_at', '>=', $yesterday)
+                ->sum('distance'),
+        ];
+
+        // Получаем завершённые заказы водителя с пагинацией
+        $query = Order::where('driver_id', $driver->id)
             ->where('status', 'completed')
-            ->orderByDesc('completed_at')
-            ->limit(50)
+            ->where('is_hidden', false)
+            ->orderByDesc('completed_at');
+
+        $total = $query->count();
+        $orders = $query->skip(($page - 1) * $perPage)
+            ->take($perPage)
             ->get()
             ->map(function ($order) {
                 return [
@@ -49,30 +74,17 @@ class DriverOrderHistoryController extends Controller
                 ];
             });
 
-        // Получаем статистику
-        $stats = [
-            'total_trips' => Order::where('driver_id', $driver->id)
-                ->where('status', 'completed')
-                ->count(),
-            'total_earnings' => Order::where('driver_id', $driver->id)
-                ->where('status', 'completed')
-                ->sum('driver_earnings'),
-            'total_distance' => Order::where('driver_id', $driver->id)
-                ->where('status', 'completed')
-                ->sum('distance'),
-            'today_trips' => Order::where('driver_id', $driver->id)
-                ->where('status', 'completed')
-                ->whereDate('completed_at', today())
-                ->count(),
-            'today_earnings' => Order::where('driver_id', $driver->id)
-                ->where('status', 'completed')
-                ->whereDate('completed_at', today())
-                ->sum('driver_earnings'),
+        $pagination = [
+            'current_page' => (int) $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => ceil($total / $perPage),
         ];
 
         return response()->json([
             'orders' => $orders,
             'stats' => $stats,
+            'pagination' => $pagination,
         ]);
     }
 }
