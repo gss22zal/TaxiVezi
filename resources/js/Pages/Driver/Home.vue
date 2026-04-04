@@ -192,6 +192,18 @@ const checkActiveOrderStatus = async () => {
           activeOrder.value.status = 'in_transit'
         }
       }
+      // Если заказ принят - обновляем статус
+      else if (data.order && data.order.status === 'accepted') {
+        if (activeOrder.value) {
+          activeOrder.value.status = 'accepted'
+        }
+      }
+      // Если водитель прибыл - обновляем статус
+      else if (data.order && data.order.status === 'arrived') {
+        if (activeOrder.value) {
+          activeOrder.value.status = 'arrived'
+        }
+      }
     }
   } catch (e) {
     console.error('Ошибка проверки статуса заказа:', e)
@@ -241,6 +253,7 @@ const loadActiveOrder = async () => {
           price: data.order.final_price,
           distance: data.order.distance,
           timeLeft: Math.round(data.order.distance * 3),
+          status: data.order.status,
           passenger: {
             name: data.order.passenger_name || 'Пассажир',
             phone: data.order.passenger_phone || '+7 900 000-00-00'
@@ -647,6 +660,7 @@ const acceptOrder = async (order) => {
         price: orderData.final_price || order.final_price,
         distance: orderData.distance || order.distance,
         timeLeft: Math.round((orderData.distance || order.distance) * 3),
+        status: 'accepted',
         passenger: {
           name: orderData.passenger_name || 'Пассажир',
           phone: orderData.passenger_phone || '+7 900 000-00-00'
@@ -964,6 +978,48 @@ const toggleTag = (tag) => {
     reviewTags.value.splice(index, 1)
   }
 }
+
+// Цветовая маркировка статусов заказов
+const getStatusBadge = (status) => {
+  const badges = {
+    new: { text: 'НОВЫЙ', class: 'bg-green-600' },
+    accepted: { text: 'ПРИНЯТ', class: 'bg-blue-600' },
+    arrived: { text: 'ПРИБЫЛ', class: 'bg-yellow-600' },
+    in_transit: { text: 'В ПУТИ', class: 'bg-orange-500' },
+    started: { text: 'В ПУТИ', class: 'bg-orange-500' },
+    completed: { text: 'ЗАВЕРШЁН', class: 'bg-gray-600' },
+    cancelled: { text: 'ОТМЕНЁН', class: 'bg-red-600' }
+  }
+  return badges[status] || badges.new
+}
+
+// Получить класс фона для статуса активного заказа
+const getActiveOrderStatusClass = (status) => {
+  const classes = {
+    new: 'bg-green-600',
+    accepted: 'bg-blue-600',
+    arrived: 'bg-yellow-600',
+    in_transit: 'bg-orange-500',
+    started: 'bg-orange-500',
+    completed: 'bg-gray-600',
+    cancelled: 'bg-red-600'
+  }
+  return classes[status] || 'bg-gray-600'
+}
+
+// Получить текст статуса для активного заказа
+const getActiveOrderStatusText = (status) => {
+  const texts = {
+    new: 'Новый заказ',
+    accepted: 'Принят',
+    arrived: 'Водитель прибыл',
+    in_transit: 'В пути',
+    started: 'В пути',
+    completed: 'Заказ завершён',
+    cancelled: 'Заказ отменён'
+  }
+  return texts[status] || 'Статус неизвестен'
+}
 </script>
 
 <template>
@@ -1129,9 +1185,11 @@ const toggleTag = (tag) => {
           <div v-for="order in availableOrders" :key="order.id"
             class="rounded-lg border border-gray-700 bg-gray-800/50 p-3 transition-all hover:border-yellow-500/50">
             <div class="flex items-start justify-between mb-2">
-              <div>
+              <div class="flex items-center gap-2">
                 <span class="text-sm font-bold text-white">{{ order.order_number }}</span>
-                <span class="ml-2 text-xs text-gray-400">{{ order.status === 'new' ? 'Новый' : 'Принят' }}</span>
+                <span :class="['rounded px-2 py-0.5 text-xs font-medium uppercase', getStatusBadge(order.status).class]">
+                  {{ getStatusBadge(order.status).text }}
+                </span>
               </div>
               <span class="text-lg font-bold text-yellow-500">{{ order.final_price }} ₽</span>
             </div>
@@ -1158,7 +1216,7 @@ const toggleTag = (tag) => {
                 </span>
               </div>
               <button @click="acceptOrder(order)"
-                class="rounded-lg bg-yellow-500 px-4 py-2 text-sm font-bold text-gray-900 hover:bg-yellow-600 transition-all">
+                class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 transition-all">
                 Принять
               </button>
             </div>
@@ -1188,7 +1246,11 @@ const toggleTag = (tag) => {
       <!-- Активный заказ -->
       <div v-if="activeOrder" class="rounded-xl border-2 border-yellow-500 bg-[#1F2937] p-4">
         <div class="mb-4 flex items-center justify-between">
-          <span class="text-sm font-bold uppercase text-yellow-500">Активный заказ</span>
+          <div class="flex items-center gap-2">
+            <span :class="['rounded px-2 py-0.5 text-xs font-medium uppercase', getActiveOrderStatusClass(activeOrder.status)]">
+              {{ getActiveOrderStatusText(activeOrder.status) }}
+            </span>
+          </div>
           <span class="text-sm text-gray-400">{{ activeOrder.id }}</span>
         </div>
 
@@ -1248,7 +1310,7 @@ const toggleTag = (tag) => {
         <!-- Кнопки "У клиента" и "В пути" -->
         <div class="mb-4 flex gap-2">
           <button @click="arrivedAtCustomer"
-            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-3 font-bold text-white transition-all hover:bg-green-700">
+            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-yellow-600 py-3 font-bold text-white transition-all hover:bg-yellow-700">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -1258,7 +1320,7 @@ const toggleTag = (tag) => {
             У КЛИЕНТА
           </button>
           <button @click="startTrip"
-            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 py-3 font-bold text-white transition-all hover:bg-blue-700">
+            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-orange-500 py-3 font-bold text-white transition-all hover:bg-orange-600">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>

@@ -88,10 +88,10 @@ Route::get('/api/passenger/orders/history', PassengerOrderHistoryController::cla
 Route::post('/api/passenger/orders/{order}/cancel', [PassengerOrderController::class, 'cancelOrder'])->middleware('auth');
 
 // API для пассажира - оставить отзыв
-Route::post('/api/passenger/orders/{order}/review', [ReviewController::class, 'store'])->middleware('auth');
+Route::post('/api/passenger/orders/{order}/review', [ReviewController::class, 'store'])->middleware(['web', 'auth']);
 
 // API для проверки отзыва на заказ
-Route::get('/api/passenger/orders/{order}/review/check', [ReviewController::class, 'checkReview'])->middleware('auth');
+Route::get('/api/passenger/orders/{order}/review/check', [ReviewController::class, 'checkReview'])->middleware(['web', 'auth']);
 
 // API для получения отзывов водителя
 Route::get('/api/driver/{driverId}/reviews', [ReviewController::class, 'driverReviews']);

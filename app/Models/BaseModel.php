@@ -16,18 +16,18 @@ class BaseModel extends Model
     protected $dateFormat = 'Y-m-d\TH:i:s.v';
 
     /**
-     * Переопределяем метод для корректного форматирования даты
+     * Переопределяем метод для корректного форматирования даты в UTC
      */
     public function freshTimestamp()
     {
-        return Carbon::now()->format($this->dateFormat);
+        return Carbon::now('UTC')->format($this->dateFormat);
     }
 
     /**
-     * Форматирование даты для хранения в БД
+     * Форматирование даты для хранения в БД (в UTC)
      */
     public function fromDateTime($value)
     {
-        return Carbon::parse($value)->format($this->dateFormat);
+        return Carbon::parse($value)->utc()->format($this->dateFormat);
     }
 }

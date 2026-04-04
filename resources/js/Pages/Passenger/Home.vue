@@ -61,7 +61,7 @@ const checkReviewExists = async (orderId) => {
  const response = await fetch(`/api/passenger/orders/${orderId}/review/check`, {
    credentials: 'include',
    headers: {
-   'X-CSRF-TOKEN': getCsrfToken(),
+   'X-XSRF-TOKEN': getCsrfToken(),
    'Accept': 'application/json'
    }
  })
@@ -81,7 +81,7 @@ const loadOrderHistory = async (page = 1) => {
     const response = await fetch(`/api/passenger/orders/history?page=${page}`, {
       credentials: 'include',
       headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
+        'X-XSRF-TOKEN': getCsrfToken(),
         'Accept': 'application/json'
       }
     })
@@ -119,14 +119,14 @@ const hideFromHistory = async (orderId) => {
       method: 'POST',
       credentials: 'include',
       headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
+        'X-XSRF-TOKEN': getCsrfToken(),
         'Accept': 'application/json'
       }
     })
     
     const data = await response.json()
     console.log('Hide order response:', data)
-    
+
     if (response.ok && data.success) {
       // Удаляем заказ из локального списка
       orderHistory.value = orderHistory.value.filter(o => o.id !== orderId)
@@ -192,11 +192,11 @@ const orderStatusText = {
 }
 
 const orderStatusColor = {
-  'new': 'blue',
-  'accepted': 'green',
-  'arrived': 'green',
-  'in_transit': 'yellow',
-  'started': 'yellow',
+  'new': 'green',
+  'accepted': 'blue',
+  'arrived': 'yellow',
+  'in_transit': 'orange',
+  'started': 'orange',
   'completed': 'gray',
   'cancelled': 'red'
 }
@@ -283,9 +283,74 @@ const submitForm = async () => {
   })
 }
 
-// ✅ Получение CSRF-токена
+// ✅ Получение CSRF-токена (сначала из cookie, потом из meta)
 const getCsrfToken = () => {
+  // Сначала пробуем получить из cookie (более надёжно)
+  const cookieToken = document.cookie
+    .split('; ')
+    .find(row => row.startsWith('XSRF-TOKEN='))
+    ?.split('=')[1]
+  
+  if (cookieToken) {
+    return decodeURIComponent(cookieToken)
+  }
+  
+  // Если нет в cookie - берём из meta
   return document.querySelector('meta[name="csrf-token"]')?.content || ''
+}
+
+// ✅ Отправка отзыва с правильным заголовком
+const submitReview = async () => {
+  if (!lastCompletedOrderId.value) {
+    alert('ID заказа не найден')
+    return
+  }
+  
+  isSubmittingReview.value = true
+  
+  console.log('Отправляем отзыв для заказа:', lastCompletedOrderId.value)
+  console.log('CSRF Token:', getCsrfToken())
+  
+  try {
+    const response = await fetch('/api/passenger/orders/' + lastCompletedOrderId.value + '/review', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'X-XSRF-TOKEN': getCsrfToken(),
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        order_id: lastCompletedOrderId.value,
+        rating: reviewRating.value,
+        comment: reviewComment.value,
+        tags: reviewTags.value
+      })
+    })
+    
+    const data = await response.json()
+    console.log('Ответ отзыва:', { status: response.status, data })
+    
+    if (response.status === 419) {
+      alert('Сессия истекла. Перезагрузите страницу.')
+      window.location.reload()
+      return
+    }
+    
+    if (data.success) {
+      closeReviewModal()
+      hasActiveOrder.value = false
+      activeOrder.value = null
+      alert('Спасибо за отзыв! ' + (data.review?.passenger_rating ? `Вы поставили ${data.review.passenger_rating} звёзд` : ''))
+    } else {
+      alert(data.message || 'Ошибка при отправке отзыва')
+    }
+  } catch (error) {
+    console.error('Review error:', error)
+    alert('Ошибка отправки отзыва')
+  } finally {
+    isSubmittingReview.value = false
+  }
 }
 
 // ✅ Исправленная функция воспроизведения звука
@@ -347,7 +412,7 @@ const fetchOrderStatus = async () => {
     const response = await fetch('/api/passenger/active-order', {
       credentials: 'include',
       headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
+        'X-XSRF-TOKEN': getCsrfToken(),
         'Accept': 'application/json'
       }
     })
@@ -472,7 +537,7 @@ const cancelOrder = async () => {
       method: 'POST',
       credentials: 'include',
       headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
+        'X-XSRF-TOKEN': getCsrfToken(),
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
@@ -531,59 +596,6 @@ const closeReviewModal = () => {
   reviewRating.value = 5
   reviewComment.value = ''
   reviewTags.value = []
-}
-
-// ✅ Отправка отзыва
-const submitReview = async () => {
-  if (!lastCompletedOrderId.value) {
-    alert('ID заказа не найден')
-    return
-  }
-  
-  isSubmittingReview.value = true
-  
-  console.log('Отправляем отзыв для заказа:', lastCompletedOrderId.value)
-  
-  try {
-    const response = await fetch('/api/passenger/orders/' + lastCompletedOrderId.value + '/review', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        order_id: lastCompletedOrderId.value,
-        rating: reviewRating.value,
-        comment: reviewComment.value,
-        tags: reviewTags.value
-      })
-    })
-    
-    const data = await response.json()
-    console.log('Ответ отзыва:', { status: response.status, data })
-    
-    if (response.status === 419) {
-      alert('Сессия истекла. Перезагрузите страницу.')
-      window.location.reload()
-      return
-    }
-    
-    if (data.success) {
-      closeReviewModal()
-      hasActiveOrder.value = false
-      activeOrder.value = null
-      alert('Спасибо за отзыв! ' + (data.review?.passenger_rating ? `Вы поставили ${data.review.passenger_rating} звёзд` : ''))
-    } else {
-      alert(data.message || 'Ошибка при отправке отзыва')
-    }
-  } catch (error) {
-    console.error('Review error:', error)
-    alert('Ошибка отправки отзыва')
-  } finally {
-    isSubmittingReview.value = false
-  }
 }
 
 // ✅ Инициализация при монтировании
@@ -722,10 +734,12 @@ onUnmounted(() => {
           <!-- Заголовок статуса -->
           <div :class="[
             'px-4 py-3 text-white',
-            orderStatusColor[activeOrder.status] === 'blue' ? 'bg-blue-600' : '',
             orderStatusColor[activeOrder.status] === 'green' ? 'bg-green-600' : '',
+            orderStatusColor[activeOrder.status] === 'blue' ? 'bg-blue-600' : '',
             orderStatusColor[activeOrder.status] === 'yellow' ? 'bg-yellow-600' : '',
+            orderStatusColor[activeOrder.status] === 'orange' ? 'bg-orange-500' : '',
             orderStatusColor[activeOrder.status] === 'red' ? 'bg-red-600' : '',
+            orderStatusColor[activeOrder.status] === 'gray' ? 'bg-gray-600' : '',
           ]">
             <div class="flex items-center justify-between">
               <div>
@@ -751,8 +765,8 @@ onUnmounted(() => {
                 ⚠️ Свободных машин нет. Пожалуйста, подождите...
               </div>
               
-              <div v-if="['accepted', 'arrived', 'in_transit'].includes(activeOrder.status) && activeOrder.driver" class="mt-2 rounded-lg p-3 text-sm min-h-[120px]" :class="activeOrder.status === 'in_transit' ? 'bg-blue-500/30' : (activeOrder.status === 'arrived' ? 'bg-yellow-500/30' : 'bg-green-500/20')">
-                <div class="font-semibold mb-2" :class="activeOrder.status === 'in_transit' ? 'text-blue-400' : (activeOrder.status === 'arrived' ? 'text-yellow-400' : 'text-green-400')">
+              <div v-if="['accepted', 'arrived', 'in_transit'].includes(activeOrder.status) && activeOrder.driver" class="mt-2 rounded-lg p-3 text-sm min-h-[120px]" :class="activeOrder.status === 'in_transit' ? 'bg-orange-500/30' : (activeOrder.status === 'arrived' ? 'bg-yellow-500/30' : 'bg-blue-500/20')">
+                <div class="font-semibold mb-2" :class="activeOrder.status === 'in_transit' ? 'text-orange-400' : (activeOrder.status === 'arrived' ? 'text-yellow-400' : 'text-blue-400')">
                   {{ activeOrder.status === 'in_transit' ? '🚗 Вы в пути! Приятной поездки' : (activeOrder.status === 'arrived' ? '🚕 Водитель прибыл! Ждёт вас' : '🚗 Скоро такси подъедет!') }}
                 </div>
                 <div class="text-white space-y-1">
@@ -972,7 +986,7 @@ onUnmounted(() => {
                     <span
                       :class="[
                         'text-xs px-2 py-0.5 rounded',
-                        order.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                        order.status === 'completed' ? 'bg-gray-500/20 text-gray-400' : 'bg-red-500/20 text-red-400'
                       ]"
                     >
                       {{ order.status === 'completed' ? 'Завершён' : 'Отменён' }}

@@ -650,6 +650,55 @@ JWT_SECRET=...
 
 ```php
 //описать где что логируется
+```
+
+---
+
+## 🎨 Цветовая маркировка статусов заказов
+
+В системе используется единая цветовая схема для отображения статусов заказов во всех интерфейсах (пассажир, водитель, диспетчер, админ):
+
+| Статус | Название | Цвет | Tailwind CSS |
+|--------|----------|------|--------------|
+| `new` | Новый заказ | Зелёный | `bg-green-600` |
+| `accepted` | Принят | Синий | `bg-blue-600` |
+| `arrived` | Прибыл к клиенту | Жёлтый | `bg-yellow-600` |
+| `in_transit` / `started` | В пути | Светло-оранжевый | `bg-orange-500` |
+| `completed` | Завершён | Серый | `bg-gray-600` |
+| `cancelled` | Отменён | Красный | `bg-red-600` |
+
+**Пример использования в Vue:**
+
+```javascript
+const orderStatusColor = {
+  'new': 'green',
+  'accepted': 'blue',
+  'arrived': 'yellow',
+  'in_transit': 'orange',
+  'started': 'orange',
+  'completed': 'gray',
+  'cancelled': 'red'
+}
+
+// В шаблоне:
+<div :class="[
+  'px-4 py-3 text-white',
+  orderStatusColor[order.status] === 'green' ? 'bg-green-600' : '',
+  orderStatusColor[order.status] === 'blue' ? 'bg-blue-600' : '',
+  orderStatusColor[order.status] === 'yellow' ? 'bg-yellow-600' : '',
+  orderStatusColor[order.status] === 'orange' ? 'bg-orange-500' : '',
+  orderStatusColor[order.status] === 'red' ? 'bg-red-600' : '',
+  orderStatusColor[order.status] === 'gray' ? 'bg-gray-600' : '',
+]">
+```
+
+### Где используется
+
+- **Passenger/Home.vue** — статус заказа, история заказов
+- **Driver/Home.vue** — доступные заказы
+- **Dispatcher/Orders.vue** — бейджи статусов в списке заказов
+- **Dispatcher/Map.vue** — маркеры заказов на карте
+- **Admin/Orders.vue** — бейджи статусов в админке
 
 ---
 
