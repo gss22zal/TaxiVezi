@@ -45,13 +45,23 @@ const isSubmittingReview = ref(false)
 const lastCompletedOrderId = ref(null) // ✅ Исправлено: теперь это ref
 const hasReviewForLastOrder = ref(false) // Проверка: есть ли отзыв для последнего завершённого заказа
 
+// История заказов
+const orderHistory = ref([])
+const isLoadingHistory = ref(false)
+const pagination = ref({
+  current_page: 1,
+  per_page: 10,
+  total: 0,
+  last_page: 1
+})
+
 // ✅ Проверка, оставлен ли отзыв на заказ
 const checkReviewExists = async (orderId) => {
  try {
  const response = await fetch(`/api/passenger/orders/${orderId}/review/check`, {
    credentials: 'include',
    headers: {
-   'X-CSRF-TOKEN': getCsrfToken(),
+   'X-XSRF-TOKEN': getCsrfToken(),
    'Accept': 'application/json'
    }
  })
@@ -62,6 +72,100 @@ const checkReviewExists = async (orderId) => {
  console.error('Error checking review:', error)
  return false
  }
+}
+
+// ✅ Загрузка истории заказов
+const loadOrderHistory = async (page = 1) => {
+  isLoadingHistory.value = true
+  try {
+    const response = await fetch(`/api/passenger/orders/history?page=${page}`, {
+      credentials: 'include',
+      headers: {
+        'X-XSRF-TOKEN': getCsrfToken(),
+        'Accept': 'application/json'
+      }
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      orderHistory.value = data.orders || []
+      pagination.value = data.pagination || {
+        current_page: 1,
+        per_page: 10,
+        total: 0,
+        last_page: 1
+      }
+    }
+  } catch (error) {
+    console.error('Error loading order history:', error)
+  } finally {
+    isLoadingHistory.value = false
+  }
+}
+
+// ✅ Переключение страницы
+const changePage = (page) => {
+  if (page >= 1 && page <= pagination.value.last_page) {
+    loadOrderHistory(page)
+  }
+}
+
+// ✅ Скрыть заказ из истории
+const hideFromHistory = async (orderId) => {
+  if (!confirm('Удалить этот заказ из истории?')) return
+  
+  try {
+    const response = await fetch(`/api/passenger/orders/${orderId}/hide`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'X-XSRF-TOKEN': getCsrfToken(),
+        'Accept': 'application/json'
+      }
+    })
+    
+    const data = await response.json()
+    console.log('Hide order response:', data)
+
+    if (response.ok && data.success) {
+      // Удаляем заказ из локального списка
+      orderHistory.value = orderHistory.value.filter(o => o.id !== orderId)
+      // Обновляем пагинацию
+      pagination.value.total--
+      pagination.value.last_page = Math.ceil(pagination.value.total / pagination.value.per_page)
+    } else {
+      alert(data.message || 'Ошибка при удалении')
+    }
+  } catch (error) {
+    console.error('Error hiding order:', error)
+    alert('Не удалось удалить заказ')
+  }
+}
+
+// ✅ Повторить заказ из истории
+const repeatFromHistory = (order) => {
+  form.value.from = order.pickup_address
+  form.value.to = order.dropoff_address
+  form.value.distance = order.distance || 12
+  form.value.notes = order.notes || ''
+  form.value.tariff_id = order.tariff_id || ''
+  
+  updateDistance()
+  
+  // Прокрутка к форме
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// ✅ Форматирование даты
+const formatDate = (dateString) => {
+  if (!dateString) return ''
+  const date = new Date(dateString)
+  return date.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 // Доступные теги для отзыва
@@ -88,11 +192,11 @@ const orderStatusText = {
 }
 
 const orderStatusColor = {
-  'new': 'blue',
-  'accepted': 'green',
-  'arrived': 'green',
-  'in_transit': 'yellow',
-  'started': 'yellow',
+  'new': 'green',
+  'accepted': 'blue',
+  'arrived': 'yellow',
+  'in_transit': 'orange',
+  'started': 'orange',
   'completed': 'gray',
   'cancelled': 'red'
 }
@@ -116,7 +220,7 @@ const calculatePrice = () => {
     calculatedPrice.value = null
     return
   }
-
+  
   const tariff = props.tariffs.find(t => t.id === parseInt(form.value.tariff_id))
   if (!tariff) return
 
@@ -179,9 +283,74 @@ const submitForm = async () => {
   })
 }
 
-// ✅ Получение CSRF-токена
+// ✅ Получение CSRF-токена (сначала из cookie, потом из meta)
 const getCsrfToken = () => {
+  // Сначала пробуем получить из cookie (более надёжно)
+  const cookieToken = document.cookie
+    .split('; ')
+    .find(row => row.startsWith('XSRF-TOKEN='))
+    ?.split('=')[1]
+  
+  if (cookieToken) {
+    return decodeURIComponent(cookieToken)
+  }
+  
+  // Если нет в cookie - берём из meta
   return document.querySelector('meta[name="csrf-token"]')?.content || ''
+}
+
+// ✅ Отправка отзыва с правильным заголовком
+const submitReview = async () => {
+  if (!lastCompletedOrderId.value) {
+    alert('ID заказа не найден')
+    return
+  }
+  
+  isSubmittingReview.value = true
+  
+  console.log('Отправляем отзыв для заказа:', lastCompletedOrderId.value)
+  console.log('CSRF Token:', getCsrfToken())
+  
+  try {
+    const response = await fetch('/api/passenger/orders/' + lastCompletedOrderId.value + '/review', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'X-XSRF-TOKEN': getCsrfToken(),
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        order_id: lastCompletedOrderId.value,
+        rating: reviewRating.value,
+        comment: reviewComment.value,
+        tags: reviewTags.value
+      })
+    })
+    
+    const data = await response.json()
+    console.log('Ответ отзыва:', { status: response.status, data })
+    
+    if (response.status === 419) {
+      alert('Сессия истекла. Перезагрузите страницу.')
+      window.location.reload()
+      return
+    }
+    
+    if (data.success) {
+      closeReviewModal()
+      hasActiveOrder.value = false
+      activeOrder.value = null
+      alert('Спасибо за отзыв! ' + (data.review?.passenger_rating ? `Вы поставили ${data.review.passenger_rating} звёзд` : ''))
+    } else {
+      alert(data.message || 'Ошибка при отправке отзыва')
+    }
+  } catch (error) {
+    console.error('Review error:', error)
+    alert('Ошибка отправки отзыва')
+  } finally {
+    isSubmittingReview.value = false
+  }
 }
 
 // ✅ Исправленная функция воспроизведения звука
@@ -197,7 +366,7 @@ const playArrivedSound = () => {
     }
     audioContext = new AudioContext()
   }
-
+  
   // Если контекст приостановлен (требует interaction) — пробуем возобновить
   if (audioContext.state === 'suspended') {
     audioContext.resume().catch(e => console.warn('Could not resume audio:', e))
@@ -243,7 +412,7 @@ const fetchOrderStatus = async () => {
     const response = await fetch('/api/passenger/active-order', {
       credentials: 'include',
       headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
+        'X-XSRF-TOKEN': getCsrfToken(),
         'Accept': 'application/json'
       }
     })
@@ -297,25 +466,29 @@ const fetchOrderStatus = async () => {
         stopPolling()
         showArrivedNotification.value = false
 
- // ✅ Если заказ завершён — показываем окно отзыва (если отзыва ещё нет)
- if (data.order.status === 'completed') {
- console.log('Заказ завершён, проверяем отзыв...')
- // ✅ Исправлено: используем .value для ref
- lastCompletedOrderId.value = data.order.id
+        // Если заказ завершён — проверяем отзыв
+        if (data.order.status === 'completed') {
+          lastCompletedOrderId.value = data.order.id
           
- // Проверяем, оставлен ли уже отзыв
- const reviewExists = await checkReviewExists(data.order.id)
- hasReviewForLastOrder.value = reviewExists
+          // Проверяем, оставлен ли уже отзыв
+          const reviewExists = await checkReviewExists(data.order.id)
+          hasReviewForLastOrder.value = reviewExists
           
- if (!reviewExists) {
- console.log('Отзыва нет, показываем окно отзыва')
- setTimeout(() => {
- showReviewModal.value = true
- },500)
- } else {
- console.log('Отзыв уже оставлен, не показываем окно')
- }
- }
+          if (!reviewExists) {
+            // Отзыва нет — показываем заказ завершённым + окно отзыва
+            hasActiveOrder.value = true
+            setTimeout(() => {
+              showReviewModal.value = true
+            }, 500)
+          } else {
+            // Отзыв уже есть — скрываем заказ, показываем форму создания нового
+            hasActiveOrder.value = false
+            activeOrder.value = null
+          }
+        } else {
+          // Заказ отменён — показываем блок заказа
+          hasActiveOrder.value = true
+        }
       }
     } else {
       hasActiveOrder.value = false
@@ -364,7 +537,7 @@ const cancelOrder = async () => {
       method: 'POST',
       credentials: 'include',
       headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
+        'X-XSRF-TOKEN': getCsrfToken(),
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
@@ -425,57 +598,6 @@ const closeReviewModal = () => {
   reviewTags.value = []
 }
 
-// ✅ Отправка отзыва
-const submitReview = async () => {
-  if (!lastCompletedOrderId.value) {
-    alert('ID заказа не найден')
-    return
-  }
-  
-  isSubmittingReview.value = true
-  
-  console.log('Отправляем отзыв для заказа:', lastCompletedOrderId.value)
-  
-  try {
-    const response = await fetch('/api/passenger/orders/' + lastCompletedOrderId.value + '/review', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'X-CSRF-TOKEN': getCsrfToken(),
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        order_id: lastCompletedOrderId.value,
-        rating: reviewRating.value,
-        comment: reviewComment.value,
-        tags: reviewTags.value
-      })
-    })
-    
-    const data = await response.json()
-    console.log('Ответ отзыва:', { status: response.status, data })
-    
-    if (response.status === 419) {
-      alert('Сессия истекла. Перезагрузите страницу.')
-      window.location.reload()
-      return
-    }
-    
-    if (data.success) {
-      closeReviewModal()
-      alert('Спасибо за отзыв! ' + (data.review?.passenger_rating ? `Вы поставили ${data.review.passenger_rating} звёзд` : ''))
-    } else {
-      alert(data.message || 'Ошибка при отправке отзыва')
-    }
-  } catch (error) {
-    console.error('Review error:', error)
-    alert('Ошибка отправки отзыва')
-  } finally {
-    isSubmittingReview.value = false
-  }
-}
-
 // ✅ Инициализация при монтировании
 onMounted(() => {
   console.log('=== PASSENGER HOME MOUNTED ===')
@@ -497,6 +619,7 @@ onMounted(() => {
   
   fetchOrderStatus()
   startPolling()
+  loadOrderHistory() // Загружаем историю заказов
   console.log('Polling interval:', pollingInterval)
 })
 
@@ -604,17 +727,19 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="mx-auto max-w-md">
+    <div class="mx-auto max-w-md space-y-4">
       <!-- Блок активного заказа -->
       <div v-if="hasActiveOrder && activeOrder" class="mb-6">
         <div class="overflow-hidden rounded-xl bg-gradient-to-br from-gray-800 to-gray-900 shadow-lg">
           <!-- Заголовок статуса -->
           <div :class="[
             'px-4 py-3 text-white',
-            orderStatusColor[activeOrder.status] === 'blue' ? 'bg-blue-600' : '',
             orderStatusColor[activeOrder.status] === 'green' ? 'bg-green-600' : '',
+            orderStatusColor[activeOrder.status] === 'blue' ? 'bg-blue-600' : '',
             orderStatusColor[activeOrder.status] === 'yellow' ? 'bg-yellow-600' : '',
+            orderStatusColor[activeOrder.status] === 'orange' ? 'bg-orange-500' : '',
             orderStatusColor[activeOrder.status] === 'red' ? 'bg-red-600' : '',
+            orderStatusColor[activeOrder.status] === 'gray' ? 'bg-gray-600' : '',
           ]">
             <div class="flex items-center justify-between">
               <div>
@@ -640,8 +765,8 @@ onUnmounted(() => {
                 ⚠️ Свободных машин нет. Пожалуйста, подождите...
               </div>
               
-              <div v-if="['accepted', 'arrived', 'in_transit'].includes(activeOrder.status) && activeOrder.driver" class="mt-2 rounded-lg p-3 text-sm" :class="activeOrder.status === 'in_transit' ? 'bg-blue-500/30' : (activeOrder.status === 'arrived' ? 'bg-yellow-500/30' : 'bg-green-500/20')">
-                <div class="font-semibold mb-2" :class="activeOrder.status === 'in_transit' ? 'text-blue-400' : (activeOrder.status === 'arrived' ? 'text-yellow-400' : 'text-green-400')">
+              <div v-if="['accepted', 'arrived', 'in_transit'].includes(activeOrder.status) && activeOrder.driver" class="mt-2 rounded-lg p-3 text-sm min-h-[120px]" :class="activeOrder.status === 'in_transit' ? 'bg-orange-500/30' : (activeOrder.status === 'arrived' ? 'bg-yellow-500/30' : 'bg-blue-500/20')">
+                <div class="font-semibold mb-2" :class="activeOrder.status === 'in_transit' ? 'text-orange-400' : (activeOrder.status === 'arrived' ? 'text-yellow-400' : 'text-blue-400')">
                   {{ activeOrder.status === 'in_transit' ? '🚗 Вы в пути! Приятной поездки' : (activeOrder.status === 'arrived' ? '🚕 Водитель прибыл! Ждёт вас' : '🚗 Скоро такси подъедет!') }}
                 </div>
                 <div class="text-white space-y-1">
@@ -698,6 +823,11 @@ onUnmounted(() => {
                 </div>
                 <div v-if="activeOrder.cancellation_reason" class="text-xs text-gray-400 mt-1">
                   {{ activeOrder.cancellation_reason }}
+                </div>
+              </div>
+              <div v-if="activeOrder.status === 'completed' && !hasReviewForLastOrder" class="mb-3 rounded-lg bg-yellow-500/20 p-3 text-center">
+                <div class="text-sm text-yellow-400">
+                  Поездка завершена! Оставьте отзыв водителю.
                 </div>
               </div>
               <div class="flex gap-2">
@@ -839,6 +969,77 @@ onUnmounted(() => {
             {{ isSubmitting ? 'Создание заказа...' : 'Создать заказ' }}
           </button>
         </form>
+
+        <!-- История заказов -->
+        <div v-if="orderHistory.length > 0" class="mt-6">
+          <h2 class="mb-3 text-lg font-bold text-white">История поездок</h2>
+          <div class="space-y-3">
+            <div
+              v-for="order in orderHistory"
+              :key="order.id"
+              class="rounded-lg bg-[#1F2937] p-3 transition-all hover:bg-gray-800"
+            >
+              <div class="flex items-start justify-between">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-white">{{ order.order_number }}</span>
+                    <span
+                      :class="[
+                        'text-xs px-2 py-0.5 rounded',
+                        order.status === 'completed' ? 'bg-gray-500/20 text-gray-400' : 'bg-red-500/20 text-red-400'
+                      ]"
+                    >
+                      {{ order.status === 'completed' ? 'Завершён' : 'Отменён' }}
+                    </span>
+                  </div>
+                  <div class="mt-1 text-sm text-gray-400 truncate">
+                    {{ order.pickup_address }} → {{ order.dropoff_address }}
+                  </div>
+                  <div class="mt-1 text-xs text-gray-500">
+                    {{ formatDate(order.created_at) }}
+                    <span v-if="order.distance" class="ml-2">• {{ order.distance }} км</span>
+                    <span v-if="order.final_price" class="ml-2">• {{ order.final_price }} ₽</span>
+                  </div>
+                </div>
+                <div class="ml-2 flex flex-shrink-0 flex-col gap-1">
+                  <button
+                    @click="repeatFromHistory(order)"
+                    class="rounded-lg bg-yellow-500/20 px-3 py-1.5 text-sm font-medium text-yellow-500 hover:bg-yellow-500/30"
+                  >
+                    Повторить
+                  </button>
+                  <button
+                    @click="hideFromHistory(order.id)"
+                    class="rounded-lg bg-red-500/20 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-500/30"
+                  >
+                    Удалить
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Пагинация -->
+          <div v-if="pagination.last_page > 1" class="mt-4 flex items-center justify-center gap-2">
+            <button
+              @click="changePage(pagination.current_page - 1)"
+              :disabled="pagination.current_page === 1"
+              class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Назад
+            </button>
+            <span class="text-sm text-gray-400">
+              {{ pagination.current_page }} / {{ pagination.last_page }}
+            </span>
+            <button
+              @click="changePage(pagination.current_page + 1)"
+              :disabled="pagination.current_page === pagination.last_page"
+              class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Вперёд →
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </MainLayout>

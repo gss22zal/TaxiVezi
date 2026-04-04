@@ -188,18 +188,36 @@ const getRatingClass = (rating) => {
 
             <!-- От кого и кому -->
             <div class="mb-2 flex items-center gap-4">
-              <div class="flex items-center gap-2">
-                <span class="text-sm text-gray-400">От пассажира:</span>
-                <span class="font-medium text-white">
-                  {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
-                </span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-sm text-gray-400">Водителю:</span>
-                <span class="font-medium text-white">
-                  {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
-                </span>
-              </div>
+              <!-- Если есть passenger_rating - это отзыв пассажира водителю -->
+              <template v-if="review.passenger_rating">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-gray-400">От пассажира:</span>
+                  <span class="font-medium text-white">
+                    {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-gray-400">Водителю:</span>
+                  <span class="font-medium text-white">
+                    {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
+                  </span>
+                </div>
+              </template>
+              <!-- Если есть driver_rating - это отзыв водителя пассажиру -->
+              <template v-else-if="review.driver_rating">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-gray-400">От водителя:</span>
+                  <span class="font-medium text-white">
+                    {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-gray-400">Пассажиру:</span>
+                  <span class="font-medium text-white">
+                    {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
+                  </span>
+                </div>
+              </template>
             </div>
 
             <!-- Рейтинг -->
@@ -225,11 +243,22 @@ const getRatingClass = (rating) => {
               <div class="text-white">{{ review.driver_comment }}</div>
             </div>
 
-            <!-- Теги -->
+            <!-- Теги пассажира -->
             <div v-if="review.passenger_tags" class="mt-2 flex flex-wrap gap-2">
               <span
                 v-for="tag in (typeof review.passenger_tags === 'string' ? JSON.parse(review.passenger_tags) : review.passenger_tags)"
-                :key="tag"
+                :key="'p-' + tag"
+                class="rounded-full bg-blue-500/20 px-3 py-1 text-xs text-blue-400"
+              >
+                {{ tag }}
+              </span>
+            </div>
+
+            <!-- Теги водителя -->
+            <div v-if="review.driver_tags" class="mt-2 flex flex-wrap gap-2">
+              <span
+                v-for="tag in (typeof review.driver_tags === 'string' ? JSON.parse(review.driver_tags) : review.driver_tags)"
+                :key="'d-' + tag"
                 class="rounded-full bg-yellow-500/20 px-3 py-1 text-xs text-yellow-400"
               >
                 {{ tag }}

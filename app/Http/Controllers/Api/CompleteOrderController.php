@@ -51,6 +51,17 @@ class CompleteOrderController extends Controller
             ], 400);
         }
         
+        // Рассчитываем driver_earnings, если ещё не рассчитано
+        $driverEarnings = $order->driver_earnings;
+        $commissionAmount = $order->commission_amount;
+        
+        if ($driverEarnings === null && $order->final_price) {
+            // Получаем процент комиссии из настроек
+            $commissionPercent = \App\Models\Setting::get('commission_percent', 10);
+            $commissionAmount = round($order->final_price * ($commissionPercent / 100), 2);
+            $driverEarnings = round($order->final_price - $commissionAmount, 2);
+        }
+        
         // Обновляем заказ
         DB::table('orders')
             ->where('id', $order->id)
@@ -58,6 +69,8 @@ class CompleteOrderController extends Controller
                 'status' => 'completed',
                 'completed_at' => DB::raw("GETDATE()"),
                 'updated_at' => DB::raw("GETDATE()"),
+                'driver_earnings' => $driverEarnings,
+                'commission_amount' => $commissionAmount,
             ]);
         
         // Обновляем водителя - делаем свободным
@@ -80,6 +93,9 @@ class CompleteOrderController extends Controller
                 'order_number' => $order->order_number,
                 'status' => 'completed',
                 'completed_at' => $order->completed_at,
+                'final_price' => $order->final_price,
+                'driver_earnings' => $order->driver_earnings,
+                'distance' => $order->distance,
             ],
             'driver' => [
                 'id' => $driver->id,

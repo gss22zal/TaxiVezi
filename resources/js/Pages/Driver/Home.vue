@@ -192,6 +192,18 @@ const checkActiveOrderStatus = async () => {
           activeOrder.value.status = 'in_transit'
         }
       }
+      // Если заказ принят - обновляем статус
+      else if (data.order && data.order.status === 'accepted') {
+        if (activeOrder.value) {
+          activeOrder.value.status = 'accepted'
+        }
+      }
+      // Если водитель прибыл - обновляем статус
+      else if (data.order && data.order.status === 'arrived') {
+        if (activeOrder.value) {
+          activeOrder.value.status = 'arrived'
+        }
+      }
     }
   } catch (e) {
     console.error('Ошибка проверки статуса заказа:', e)
@@ -218,10 +230,9 @@ const loadActiveOrder = async () => {
       const data = await response.json()
 
       if (data.order) {
-        // Если заказ уже завершён - показываем сообщение и сбрасываем
+        // Если заказ уже завершён - сбрасываем без уведомления
         if (data.order.status === 'completed') {
           console.log('Заказ уже завершён, сбрасываем')
-          alert('Поездка завершена! Спасибо за работу.')
           activeOrder.value = null
           driverStatus.value = 'free'
           return
@@ -242,6 +253,7 @@ const loadActiveOrder = async () => {
           price: data.order.final_price,
           distance: data.order.distance,
           timeLeft: Math.round(data.order.distance * 3),
+          status: data.order.status,
           passenger: {
             name: data.order.passenger_name || 'Пассажир',
             phone: data.order.passenger_phone || '+7 900 000-00-00'
@@ -519,6 +531,12 @@ const stats = ref({
 // История поездок
 const tripHistory = ref([])
 const tripHistoryLoading = ref(true)
+const tripPagination = ref({
+  current_page: 1,
+  per_page: 10,
+  total: 0,
+  last_page: 1
+})
 const tripStats = ref({
   total_trips: 0,
   total_earnings: 0,
@@ -527,10 +545,11 @@ const tripStats = ref({
   today_earnings: 0
 })
 
-// Загрузка истории поездок
-const loadTripHistory = async () => {
+// Загрузка истории поездок с пагинацией
+const loadTripHistory = async (page = 1) => {
+  tripHistoryLoading.value = true
   try {
-    const response = await fetch('/api/driver/orders/history', {
+    const response = await fetch(`/api/driver/orders/history?page=${page}`, {
       headers: {
         'Accept': 'application/json',
         'X-Requested-With': 'XMLHttpRequest'
@@ -539,13 +558,70 @@ const loadTripHistory = async () => {
 
     if (response.ok) {
       const data = await response.json()
+      console.log('Trip history loaded:', data.stats)
       tripHistory.value = data.orders || []
       tripStats.value = data.stats || tripStats.value
+      tripPagination.value = data.pagination || {
+        current_page: 1,
+        per_page: 10,
+        total: 0,
+        last_page: 1
+      }
+      
+      // Обновляем статистику за сегодня из API
+      if (data.stats) {
+        console.log('Updating stats:', {
+          trips: data.stats.today_trips,
+          earnings: data.stats.today_earnings,
+          distance: data.stats.today_distance
+        })
+        stats.value.trips = data.stats.today_trips || 0
+        stats.value.earnings = Number(data.stats.today_earnings) || 0
+        stats.value.distance = Number(data.stats.today_distance) || 0
+      }
     }
   } catch (e) {
     console.error('Ошибка загрузки истории поездок:', e)
   } finally {
     tripHistoryLoading.value = false
+  }
+}
+
+// Переключение страницы истории
+const changeTripPage = (page) => {
+  if (page >= 1 && page <= tripPagination.value.last_page) {
+    loadTripHistory(page)
+  }
+}
+
+// Скрыть заказ из истории
+const hideFromTripHistory = async (orderId) => {
+  if (!confirm('Удалить этот заказ из истории?')) return
+  
+  try {
+    const response = await fetch(`/api/driver/orders/${orderId}/hide`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    })
+
+    const data = await response.json()
+    console.log('Hide order response:', data)
+    
+    if (response.ok && data.success) {
+      // Удаляем заказ из локального списка
+      tripHistory.value = tripHistory.value.filter(o => o.id !== orderId)
+      // Обновляем пагинацию
+      tripPagination.value.total--
+      tripPagination.value.last_page = Math.ceil(tripPagination.value.total / tripPagination.value.per_page)
+    } else {
+      alert(data.message || 'Ошибка при удалении')
+    }
+  } catch (error) {
+    console.error('Error hiding order:', error)
+    alert('Не удалось удалить заказ')
   }
 }
 
@@ -584,6 +660,7 @@ const acceptOrder = async (order) => {
         price: orderData.final_price || order.final_price,
         distance: orderData.distance || order.distance,
         timeLeft: Math.round((orderData.distance || order.distance) * 3),
+        status: 'accepted',
         passenger: {
           name: orderData.passenger_name || 'Пассажир',
           phone: orderData.passenger_phone || '+7 900 000-00-00'
@@ -798,10 +875,12 @@ const completeOrder = async () => {
       // Очищаем активный заказ
       activeOrder.value = null
 
-      // Обновляем статистику
+      // Обновляем статистику правильными значениями с сервера
+      const earnings = result.order?.driver_earnings || result.order?.final_price || orderPrice
+      const distance = result.order?.distance || orderDistance
       stats.value.trips++
-      stats.value.earnings += orderPrice
-      stats.value.distance += orderDistance
+      stats.value.earnings += Number(earnings)
+      stats.value.distance += Number(distance)
 
       // Возвращаем водителя в свободные
       driverStatus.value = 'free'
@@ -898,6 +977,48 @@ const toggleTag = (tag) => {
   } else {
     reviewTags.value.splice(index, 1)
   }
+}
+
+// Цветовая маркировка статусов заказов
+const getStatusBadge = (status) => {
+  const badges = {
+    new: { text: 'НОВЫЙ', class: 'bg-green-600' },
+    accepted: { text: 'ПРИНЯТ', class: 'bg-blue-600' },
+    arrived: { text: 'ПРИБЫЛ', class: 'bg-yellow-600' },
+    in_transit: { text: 'В ПУТИ', class: 'bg-orange-500' },
+    started: { text: 'В ПУТИ', class: 'bg-orange-500' },
+    completed: { text: 'ЗАВЕРШЁН', class: 'bg-gray-600' },
+    cancelled: { text: 'ОТМЕНЁН', class: 'bg-red-600' }
+  }
+  return badges[status] || badges.new
+}
+
+// Получить класс фона для статуса активного заказа
+const getActiveOrderStatusClass = (status) => {
+  const classes = {
+    new: 'bg-green-600',
+    accepted: 'bg-blue-600',
+    arrived: 'bg-yellow-600',
+    in_transit: 'bg-orange-500',
+    started: 'bg-orange-500',
+    completed: 'bg-gray-600',
+    cancelled: 'bg-red-600'
+  }
+  return classes[status] || 'bg-gray-600'
+}
+
+// Получить текст статуса для активного заказа
+const getActiveOrderStatusText = (status) => {
+  const texts = {
+    new: 'Новый заказ',
+    accepted: 'Принят',
+    arrived: 'Водитель прибыл',
+    in_transit: 'В пути',
+    started: 'В пути',
+    completed: 'Заказ завершён',
+    cancelled: 'Заказ отменён'
+  }
+  return texts[status] || 'Статус неизвестен'
 }
 </script>
 
@@ -1064,9 +1185,11 @@ const toggleTag = (tag) => {
           <div v-for="order in availableOrders" :key="order.id"
             class="rounded-lg border border-gray-700 bg-gray-800/50 p-3 transition-all hover:border-yellow-500/50">
             <div class="flex items-start justify-between mb-2">
-              <div>
+              <div class="flex items-center gap-2">
                 <span class="text-sm font-bold text-white">{{ order.order_number }}</span>
-                <span class="ml-2 text-xs text-gray-400">{{ order.status === 'new' ? 'Новый' : 'Принят' }}</span>
+                <span :class="['rounded px-2 py-0.5 text-xs font-medium uppercase', getStatusBadge(order.status).class]">
+                  {{ getStatusBadge(order.status).text }}
+                </span>
               </div>
               <span class="text-lg font-bold text-yellow-500">{{ order.final_price }} ₽</span>
             </div>
@@ -1093,7 +1216,7 @@ const toggleTag = (tag) => {
                 </span>
               </div>
               <button @click="acceptOrder(order)"
-                class="rounded-lg bg-yellow-500 px-4 py-2 text-sm font-bold text-gray-900 hover:bg-yellow-600 transition-all">
+                class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 transition-all">
                 Принять
               </button>
             </div>
@@ -1123,7 +1246,11 @@ const toggleTag = (tag) => {
       <!-- Активный заказ -->
       <div v-if="activeOrder" class="rounded-xl border-2 border-yellow-500 bg-[#1F2937] p-4">
         <div class="mb-4 flex items-center justify-between">
-          <span class="text-sm font-bold uppercase text-yellow-500">Активный заказ</span>
+          <div class="flex items-center gap-2">
+            <span :class="['rounded px-2 py-0.5 text-xs font-medium uppercase', getActiveOrderStatusClass(activeOrder.status)]">
+              {{ getActiveOrderStatusText(activeOrder.status) }}
+            </span>
+          </div>
           <span class="text-sm text-gray-400">{{ activeOrder.id }}</span>
         </div>
 
@@ -1183,7 +1310,7 @@ const toggleTag = (tag) => {
         <!-- Кнопки "У клиента" и "В пути" -->
         <div class="mb-4 flex gap-2">
           <button @click="arrivedAtCustomer"
-            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 py-3 font-bold text-white transition-all hover:bg-green-700">
+            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-yellow-600 py-3 font-bold text-white transition-all hover:bg-yellow-700">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -1193,7 +1320,7 @@ const toggleTag = (tag) => {
             У КЛИЕНТА
           </button>
           <button @click="startTrip"
-            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 py-3 font-bold text-white transition-all hover:bg-blue-700">
+            class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-orange-500 py-3 font-bold text-white transition-all hover:bg-orange-600">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
@@ -1271,16 +1398,7 @@ const toggleTag = (tag) => {
         <div class="mb-3 flex items-center justify-between">
           <div class="text-sm font-medium uppercase text-gray-400">История поездок</div>
           <div class="text-xs text-gray-500">
-            {{ tripStats.total_trips }} поездок
-          </div>
-        </div>
-
-        <!-- Статистика за сегодня -->
-        <div v-if="tripStats.today_trips > 0" class="mb-4 rounded-lg bg-gray-800 p-3">
-          <div class="text-xs text-gray-400 mb-2">Сегодня</div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-white">{{ tripStats.today_trips }} поездок</span>
-            <span class="text-sm font-bold text-yellow-500">{{ tripStats.today_earnings }} ₽</span>
+            {{ tripPagination.total }} поездок
           </div>
         </div>
 
@@ -1291,7 +1409,7 @@ const toggleTag = (tag) => {
         <div v-else-if="tripHistory.length === 0" class="py-4 text-center text-gray-500">
           Нет завершённых поездок
         </div>
-        <div v-else class="space-y-3 max-h-64 overflow-y-auto">
+        <div v-else class="space-y-3">
           <div v-for="trip in tripHistory" :key="trip.id"
             class="flex items-center justify-between border-b border-gray-700 pb-3 last:border-0">
             <div class="flex-1 min-w-0">
@@ -1302,13 +1420,34 @@ const toggleTag = (tag) => {
                 {{ trip.passenger_name ? '• ' + trip.passenger_name : '' }}
               </div>
             </div>
-            <div class="text-right flex-shrink-0 ml-3">
+            <div class="flex flex-col items-end gap-1 ml-3">
               <div class="font-bold text-white">{{ trip.driver_earnings || trip.final_price }} ₽</div>
               <div class="text-xs text-gray-400">
                 {{ trip.completed_at ? new Date(trip.completed_at).toLocaleDateString('ru-RU') : '' }}
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Пагинация -->
+        <div v-if="tripPagination.last_page > 1" class="mt-4 flex items-center justify-center gap-2">
+          <button
+            @click="changeTripPage(tripPagination.current_page - 1)"
+            :disabled="tripPagination.current_page === 1"
+            class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            ← Назад
+          </button>
+          <span class="text-sm text-gray-400">
+            {{ tripPagination.current_page }} / {{ tripPagination.last_page }}
+          </span>
+          <button
+            @click="changeTripPage(tripPagination.current_page + 1)"
+            :disabled="tripPagination.current_page === tripPagination.last_page"
+            class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Вперёд →
+          </button>
         </div>
       </div>
     </div>

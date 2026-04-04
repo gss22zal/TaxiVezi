@@ -143,11 +143,14 @@ class AdminDashboardController extends Controller
                     default => 'Новый заказ ' . $order->order_number,
                 };
 
+                // Конвертируем время в московский часовой пояс для корректного отображения
+                $createdAt = $order->created_at->timezone('Europe/Moscow');
+
                 return [
                     'type' => $order->status === 'completed' ? 'order' : 
                              ($order->status === 'cancelled' ? 'alert' : 'order'),
                     'text' => $text,
-                    'time' => $order->created_at->diffForHumans(),
+                    'time' => $createdAt->format('d.m.y H:i'),
                 ];
             });
 

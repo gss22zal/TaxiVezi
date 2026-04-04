@@ -90,7 +90,7 @@ const orders = ref([
         >
           <div :class="[
             'flex h-6 w-6 items-center justify-center rounded-full border-2 border-gray-900',
-            order.status === 'new' ? 'bg-red-500' : 'bg-blue-500'
+            order.status === 'new' ? 'bg-green-500' : 'bg-blue-500'
           ]">
             <svg class="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
@@ -124,7 +124,7 @@ const orders = ref([
               <span class="text-gray-400">Занят</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="h-3 w-3 rounded-full bg-red-500"></span>
+              <span class="h-3 w-3 rounded-full bg-green-500"></span>
               <span class="text-gray-400">Новый заказ</span>
             </div>
             <div class="flex items-center gap-2">

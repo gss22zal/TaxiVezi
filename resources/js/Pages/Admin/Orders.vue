@@ -47,13 +47,13 @@ const setTab = (id) => {
 
 const getStatusBadge = (status) => {
   const badges = {
-    new: { text: 'НОВЫЙ', class: 'bg-blue-600' },
-    pending: { text: 'НОВЫЙ', class: 'bg-blue-600' },
-    accepted: { text: 'ПРИНЯТ', class: 'bg-yellow-600' },
-    arrived: { text: 'ПРИБЫЛ', class: 'bg-yellow-500' },
-    started: { text: 'В ПУТИ', class: 'bg-green-600' },
-    in_transit: { text: 'В ПУТИ', class: 'bg-blue-600' },
-    in_progress: { text: 'В ПУТИ', class: 'bg-green-600' },
+    new: { text: 'НОВЫЙ', class: 'bg-green-600' },
+    pending: { text: 'НОВЫЙ', class: 'bg-green-600' },
+    accepted: { text: 'ПРИНЯТ', class: 'bg-blue-600' },
+    arrived: { text: 'ПРИБЫЛ', class: 'bg-yellow-600' },
+    started: { text: 'В ПУТИ', class: 'bg-orange-500' },
+    in_transit: { text: 'В ПУТИ', class: 'bg-orange-500' },
+    in_progress: { text: 'В ПУТИ', class: 'bg-orange-500' },
     completed: { text: 'ЗАВЕРШЁН', class: 'bg-gray-600' },
     cancelled: { text: 'ОТМЕНЁН', class: 'bg-red-600' }
   }

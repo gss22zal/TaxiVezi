@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 class ReviewController extends Controller
 {
     /**
-     * Оставить отзыв на водителя (от пассажира)
+     * Оставить отзыв на водителя (от пассажира) после поездки
      */
     public function store(Request $request)
     {
@@ -78,35 +78,61 @@ class ReviewController extends Controller
         }
 
         // Проверяем что пассажир ещё не оставлял отзыв (именно passenger_rating, не просто наличие записи)
-        if (Review::where('order_id', $order->id)
+        $existingReview = Review::where('order_id', $order->id)
             ->where('passenger_id', $passenger->id)
             ->whereNotNull('passenger_rating')
-            ->exists()) {
+            ->first();
+
+        if ($existingReview) {
             return response()->json(['message' => 'Отзыв уже оставлен'], 409);
         }
 
-        // ✅ Создаём отзыв через DB::table для SQL Server (избегаем проблем с timestamps)
-        // SQL Server требует формат YYYY-MM-DDTHH:MM:SS
-        $now = \Carbon\Carbon::now()->toDateTimeString();
-        // Или явно с T
+        // Ищем существующую запись (может быть от водителя)
+        $review = Review::where('order_id', $order->id)->first();
+
         $now = date('Y-m-d\TH:i:s');
 
-        $reviewId = DB::table('reviews')->insertGetId([
-            'order_id' => $order->id,
-            'passenger_id' => $passenger->id,
-            'driver_id' => $order->driver_id,
-            'passenger_rating' => (int) $validated['rating'],
-            'passenger_comment' => $validated['comment'] ?? null,
-            'passenger_tags' => !empty($validated['tags']) 
-                ? json_encode($validated['tags'], JSON_UNESCAPED_UNICODE)
-                : null,
-            'driver_tags' => null,
-            'is_anonymous' => false,
-            'created_at' => DB::raw("CAST('$now' AS DATETIME2)"),
-            'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
-        ]);
+        if ($review) {
+            // Обновляем существующую запись, добавляя данные пассажира
+            DB::table('reviews')
+                ->where('id', $review->id)
+                ->update([
+                    'passenger_id' => $passenger->id,
+                    'passenger_rating' => (int) $validated['rating'],
+                    'passenger_comment' => $validated['comment'] ?? null,
+                    'passenger_tags' => !empty($validated['tags'])
+                        ? json_encode($validated['tags'], JSON_UNESCAPED_UNICODE)
+                        : null,
+                    'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                ]);
+            $reviewId = $review->id;
+            Log::info('Passenger review updated existing record', [
+                'review_id' => $reviewId,
+                'order_id' => $order->id,
+            ]);
+        } else {
+            // Создаём новую запись
+            $reviewId = DB::table('reviews')->insertGetId([
+                'order_id' => $order->id,
+                'passenger_id' => $passenger->id,
+                'driver_id' => $order->driver_id,
+                'passenger_rating' => (int) $validated['rating'],
+                'passenger_comment' => $validated['comment'] ?? null,
+                'passenger_tags' => !empty($validated['tags']) 
+                    ? json_encode($validated['tags'], JSON_UNESCAPED_UNICODE)
+                    : null,
+                'driver_tags' => null,
+                'is_anonymous' => false,
+                'created_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+            ]);
+            Log::info('Passenger review created new record', [
+                'review_id' => $reviewId,
+                'order_id' => $order->id,
+            ]);
+        }
 
-        // ✅ Обновляем рейтинг водителя
+        // Обновляем рейтинг водителя
         if ($order->driver_id) {
             $driverReviews = Review::where('driver_id', $order->driver_id)
                 ->whereNotNull('passenger_rating')
@@ -121,12 +147,6 @@ class ReviewController extends Controller
                     'total_ratings' => $driverReviews->count(),
                 ]);
         }
-
-        Log::info('Review created', [
-            'review_id' => $reviewId,
-            'order_id' => $order->id,
-            'rating' => $validated['rating']
-        ]);
 
         return response()->json([
             'success' => true,
@@ -306,32 +326,62 @@ class ReviewController extends Controller
             ], 400);
         }
 
-        // Проверяем что отзыв ещё не оставлен
-        if (Review::where('order_id', $order->id)
+        // Проверяем что отзыв от водителя ещё не оставлен (именно driver_rating)
+        $existingReview = Review::where('order_id', $order->id)
             ->where('driver_id', $driver->id)
-            ->exists()) {
+            ->whereNotNull('driver_rating')
+            ->first();
+
+        if ($existingReview) {
             return response()->json(['message' => 'Отзыв уже оставлен'], 409);
         }
 
-        // Создаём отзыв
+        // Ищем существующую запись (может быть от пассажира)
+        $review = Review::where('order_id', $order->id)->first();
+
         $now = date('Y-m-d\TH:i:s');
 
-        $reviewId = DB::table('reviews')->insertGetId([
-            'order_id' => $order->id,
-            'passenger_id' => $order->passenger_id,
-            'driver_id' => $driver->id,
-            'passenger_rating' => null,
-            'driver_rating' => (int) $validated['rating'],
-            'passenger_comment' => null,
-            'driver_comment' => $validated['comment'] ?? null,
-            'passenger_tags' => null,
-            'driver_tags' => !empty($validated['tags'])
-                ? json_encode($validated['tags'], JSON_UNESCAPED_UNICODE)
-                : null,
-            'is_anonymous' => false,
-            'created_at' => DB::raw("CAST('$now' AS DATETIME2)"),
-            'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
-        ]);
+        if ($review) {
+            // Обновляем существующую запись, добавляя данные водителя
+            DB::table('reviews')
+                ->where('id', $review->id)
+                ->update([
+                    'driver_id' => $driver->id,
+                    'driver_rating' => (int) $validated['rating'],
+                    'driver_comment' => $validated['comment'] ?? null,
+                    'driver_tags' => !empty($validated['tags'])
+                        ? json_encode($validated['tags'], JSON_UNESCAPED_UNICODE)
+                        : null,
+                    'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                ]);
+            $reviewId = $review->id;
+            Log::info('Driver review updated existing record', [
+                'review_id' => $reviewId,
+                'order_id' => $order->id,
+            ]);
+        } else {
+            // Создаём новую запись
+            $reviewId = DB::table('reviews')->insertGetId([
+                'order_id' => $order->id,
+                'passenger_id' => $order->passenger_id,
+                'driver_id' => $driver->id,
+                'passenger_rating' => null,
+                'driver_rating' => (int) $validated['rating'],
+                'passenger_comment' => null,
+                'driver_comment' => $validated['comment'] ?? null,
+                'passenger_tags' => null,
+                'driver_tags' => !empty($validated['tags'])
+                    ? json_encode($validated['tags'], JSON_UNESCAPED_UNICODE)
+                    : null,
+                'is_anonymous' => false,
+                'created_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+            ]);
+            Log::info('Driver review created new record', [
+                'review_id' => $reviewId,
+                'order_id' => $order->id,
+            ]);
+        }
 
         // Обновляем рейтинг пассажира
         if ($order->passenger_id) {
@@ -348,12 +398,6 @@ class ReviewController extends Controller
                     'total_ratings' => $passengerReviews->count(),
                 ]);
         }
-
-        Log::info('Driver review created', [
-            'review_id' => $reviewId,
-            'order_id' => $order->id,
-            'rating' => $validated['rating']
-        ]);
 
         return response()->json([
             'success' => true,
