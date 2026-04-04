@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Driver;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -48,14 +50,18 @@ class AcceptOrderController extends Controller
             return response()->json(['message' => 'Заказ уже принят другим водителем'], 400);
         }
         
-        // Используем сырой SQL запрос для обновления с GETDATE()
+        // Получаем время с учётом часового пояса
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone)->format('Y-m-d H:i:s.v');
+        
+        // Обновляем заказ
         DB::table('orders')
             ->where('id', $order->id)
             ->update([
                 'driver_id' => $driver->id,
                 'status' => 'accepted',
-                'accepted_at' => DB::raw("GETDATE()"),
-                'updated_at' => DB::raw("GETDATE()"),
+                'accepted_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
         
         // Делаем водителя занятым
@@ -64,7 +70,7 @@ class AcceptOrderController extends Controller
             ->update([
                 'is_online' => true,
                 'can_accept_orders' => false,
-                'updated_at' => DB::raw("GETDATE()"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
         
         // Обновляем локальную модель

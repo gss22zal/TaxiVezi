@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Driver;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -39,13 +41,17 @@ class StartTripController extends Controller
             ], 400);
         }
 
+        // Получаем время с учётом часового пояса
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone)->format('Y-m-d H:i:s.v');
+
         // Обновляем заказ - статус "в пути"
         DB::table('orders')
             ->where('id', $order->id)
             ->update([
                 'status' => 'in_transit',
-                'started_at' => DB::raw("GETDATE()"),
-                'updated_at' => DB::raw("GETDATE()"),
+                'started_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
 
         $order->refresh();

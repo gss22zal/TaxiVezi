@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -44,12 +46,16 @@ class DriverOrderHideController extends Controller
             return response()->json(['message' => 'Можно скрыть только завершённые заказы'], 400);
         }
 
+        // Получаем время с учётом часового пояса
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone)->format('Y-m-d H:i:s.v');
+
         // Скрываем заказ
         DB::table('orders')
             ->where('id', $order->id)
             ->update([
                 'is_hidden' => true,
-                'hidden_at' => DB::raw("GETDATE()"),
+                'hidden_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
 
         return response()->json([

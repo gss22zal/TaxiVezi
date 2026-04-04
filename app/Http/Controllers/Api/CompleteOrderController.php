@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Driver;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -62,13 +64,17 @@ class CompleteOrderController extends Controller
             $driverEarnings = round($order->final_price - $commissionAmount, 2);
         }
         
+        // Получаем время с учётом часового пояса
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone)->format('Y-m-d H:i:s.v');
+        
         // Обновляем заказ
         DB::table('orders')
             ->where('id', $order->id)
             ->update([
                 'status' => 'completed',
-                'completed_at' => DB::raw("GETDATE()"),
-                'updated_at' => DB::raw("GETDATE()"),
+                'completed_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
                 'driver_earnings' => $driverEarnings,
                 'commission_amount' => $commissionAmount,
             ]);
@@ -80,7 +86,7 @@ class CompleteOrderController extends Controller
                 'is_online' => true,
                 'can_accept_orders' => true,
                 'total_rides' => DB::raw('total_rides + 1'),
-                'updated_at' => DB::raw("GETDATE()"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
         
         // Обновляем количество поездок

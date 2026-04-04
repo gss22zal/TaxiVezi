@@ -130,13 +130,20 @@ const maxOrders = computed(() => Math.max(...ordersChart.value.map(d => d.value)
       <!-- Revenue Chart -->
       <div class="rounded-xl border border-gray-700 bg-gray-800 p-4">
         <h2 class="mb-4 text-lg font-bold text-white">Выручка (7 дней)</h2>
-        <div class="flex h-48 items-end justify-between gap-2">
-          <div v-for="day in revenueChart" :key="day.day" class="flex flex-1 flex-col items-center gap-2">
+        <div style="height: 200px; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding-bottom: 24px;">
+          <div v-for="day in revenueChart" :key="day.day" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%;">
+            <span class="text-xs text-green-400 font-bold mb-1">{{ day.value > 0 ? Math.round(day.value).toLocaleString() + ' ₽' : '0' }}</span>
             <div 
-              class="w-full rounded-t bg-yellow-500 transition-all hover:bg-yellow-600"
-              :style="{ height: (day.value / maxRevenue * 100) + '%' }"
+              :style="{ 
+                width: '100%', 
+                height: Math.max((day.value / maxRevenue * 100), 2) + '%', 
+                backgroundColor: '#eab308',
+                borderTopLeftRadius: '4px',
+                borderTopRightRadius: '4px',
+                minHeight: '4px'
+              }"
             ></div>
-            <span class="text-xs text-gray-400">{{ day.day }}</span>
+            <span class="text-xs text-gray-400 mt-2">{{ day.day }}</span>
           </div>
         </div>
       </div>

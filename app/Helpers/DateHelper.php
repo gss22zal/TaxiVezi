@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use App\Models\Setting;
 use Carbon\Carbon;
 
 /**
@@ -9,18 +10,20 @@ use Carbon\Carbon;
 if (!function_exists('now_db')) {
     /**
      * Возвращает текущую дату/время для SQL Server
-     * Используется в запросах DB::raw()
+     * С учётом часового пояса из настроек
      */
     function now_db(): string
     {
-        return Carbon::now(config('app.timezone'))->format('Y-m-d\TH:i:s.v');
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        return Carbon::now($timezone)->format('Y-m-d\TH:i:s.v');
     }
 }
 
 if (!function_exists('getdate_db')) {
     /**
      * Возвращает текущую дату/время SQL Server через GETDATE()
-     * Используется в DB::raw() для вставки в БД
+     * Внимание: GETDATE() не учитывает часовой пояс!
+     * Используйте now_db() для правильного времени
      */
     function getdate_db(): \Illuminate\Database\Query\Expression
     {
@@ -53,12 +56,12 @@ if (!function_exists('date_add_db')) {
 if (!function_exists('today_db')) {
     /**
      * Возвращает текущую дату для SQL Server (без времени)
-     * 
-     * @return string
+     * С учётом часового пояса из настроек
      */
     function today_db(): string
     {
-        return Carbon::now(config('app.timezone'))->format('Y-m-d');
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        return Carbon::now($timezone)->format('Y-m-d');
     }
 }
 

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -14,6 +16,10 @@ class AdminOrdersController extends Controller
      */
     public function index(Request $request)
     {
+        // Получаем часовой пояс из настроек
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone);
+        
         $query = Order::with([
             'passenger:id,user_id',
             'passenger.user:id,first_name,last_name,phone',
@@ -42,23 +48,46 @@ class AdminOrdersController extends Controller
             $query->where('status', $request->status);
         }
 
+        // Фильтр по дате
+        $dateFrom = $request->date_from;
+        $dateTo = $request->date_to;
+        
+        if ($dateFrom) {
+            $query->whereDate('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $query->whereDate('created_at', '<=', $dateTo);
+        }
+
         $orders = $query->orderByDesc('id')->paginate(15);
 
-        // Статистика
+        // Статистика (с учётом фильтров даты)
+        $statsQuery = Order::query();
+        if ($dateFrom) {
+            $statsQuery->whereDate('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $statsQuery->whereDate('created_at', '<=', $dateTo);
+        }
+
         $stats = [
-            'total' => Order::count(),
-            'new' => Order::where('status', 'new')->count(),
-            'in_progress' => Order::whereIn('status', ['accepted', 'arrived', 'started'])->count(),
-            'completed' => Order::where('status', 'completed')->count(),
-            'cancelled' => Order::where('status', 'cancelled')->count(),
+            'total' => (clone $statsQuery)->count(),
+            'all' => (clone $statsQuery)->count(),
+            'new' => (clone $statsQuery)->where('status', 'new')->count(),
+            'accepted' => (clone $statsQuery)->where('status', 'accepted')->count(),
+            'arrived' => (clone $statsQuery)->where('status', 'arrived')->count(),
+            'in_transit' => (clone $statsQuery)->where('status', 'in_transit')->count(),
+            'in_progress' => (clone $statsQuery)->whereIn('status', ['accepted', 'arrived', 'started'])->count(),
+            'completed' => (clone $statsQuery)->where('status', 'completed')->count(),
+            'cancelled' => (clone $statsQuery)->where('status', 'cancelled')->count(),
             'today_completed' => Order::where('status', 'completed')
-                ->whereDate('completed_at', today())->count(),
+                ->whereDate('completed_at', $now->toDateString())->count(),
             'today_earnings' => Order::where('status', 'completed')
-                ->whereDate('completed_at', today())
+                ->whereDate('completed_at', $now->toDateString())
                 ->sum('final_price'),
             'month_earnings' => Order::where('status', 'completed')
-                ->whereMonth('completed_at', now()->month)
-                ->whereYear('completed_at', now()->year)
+                ->whereMonth('completed_at', $now->month)
+                ->whereYear('completed_at', $now->year)
                 ->sum('final_price'),
         ];
 
@@ -73,7 +102,10 @@ class AdminOrdersController extends Controller
             'filters' => [
                 'search' => $request->search ?? '',
                 'status' => $request->status ?? 'all',
+                'date_from' => $dateFrom ?? '',
+                'date_to' => $dateTo ?? '',
             ],
+            'serverDate' => $now->toDateString(),
             'stats' => $stats,
         ]);
     }

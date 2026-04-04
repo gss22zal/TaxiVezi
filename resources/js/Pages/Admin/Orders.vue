@@ -19,30 +19,131 @@ const props = defineProps({
   stats: {
     type: Object,
     default: () => ({})
+  },
+  serverDate: {
+    type: String,
+    default: ''
   }
 })
 
 const activeTab = ref(props.filters?.status || 'all')
 
+// Фильтры по дате
+const dateFrom = ref(props.filters?.date_from || '')
+const dateTo = ref(props.filters?.date_to || '')
+
+const activeDateFilter = ref('')
+
+// Кнопки-фильтры - вычисляемые, зависят от serverDate
+const dateButtons = computed(() => {
+  const getServerDate = () => {
+    if (props.serverDate) {
+      // Просто используем строку даты напрямую, не парсим через Date
+      // Сервер уже присылает дату в формате YYYY-MM-DD
+      return props.serverDate
+    }
+    // Запасной вариант - используем UTC дату
+    const now = new Date()
+    return now.toISOString().split('T')[0]
+  }
+
+  const serverDate = getServerDate()
+
+  return [
+    { id: 'today', name: 'Сегодня', getDates: () => {
+      return { from: serverDate, to: serverDate }
+    }},
+    { id: 'yesterday', name: 'Вчера', getDates: () => {
+      // Вычисляем вчерашний день
+      const d = new Date(serverDate + 'T00:00:00+00:00')
+      d.setDate(d.getDate() - 1)
+      const yesterday = d.toISOString().split('T')[0]
+      return { from: yesterday, to: yesterday }
+    }},
+    { id: 'week', name: 'За неделю', getDates: () => {
+      const to = serverDate
+      const d = new Date(serverDate + 'T00:00:00+00:00')
+      d.setDate(d.getDate() - 7)
+      const from = d.toISOString().split('T')[0]
+      return { from, to }
+    }},
+    { id: 'month', name: 'За месяц', getDates: () => {
+      const to = serverDate
+      const d = new Date(serverDate + 'T00:00:00+00:00')
+      d.setMonth(d.getMonth() - 1)
+      const from = d.toISOString().split('T')[0]
+      return { from, to }
+    }},
+    { id: 'month_start', name: 'С начала месяца', getDates: () => {
+      const d = new Date(serverDate + 'T00:00:00+00:00')
+      d.setDate(1)
+      const from = d.toISOString().split('T')[0]
+      return { from, to: '' }
+    }},
+  ]
+})
+
+const setDateFilter = (button) => {
+  activeDateFilter.value = button.id
+  const dates = button.getDates()
+  dateFrom.value = dates.from
+  dateTo.value = dates.to
+  applyFilters()
+}
+
+const clearDateFilter = () => {
+  activeDateFilter.value = ''
+  dateFrom.value = ''
+  dateTo.value = ''
+  applyFilters()
+}
+
+const applyFilters = () => {
+  const params = {
+    status: activeTab.value,
+    date_from: dateFrom.value,
+    date_to: dateTo.value,
+  }
+  router.get(route('admin.orders'), params, { preserveState: true })
+}
+
 const tabs = [
-  { id: 'all', name: 'Все' },
-  { id: 'new', name: 'Новые' },
-  { id: 'accepted', name: 'Принятые' },
-  { id: 'arrived', name: 'Прибыл' },
-  { id: 'in_transit', name: 'В пути' },
-  { id: 'completed', name: 'Завершённые' },
-  { id: 'cancelled', name: 'Отменённые' },
+  { id: 'all', name: 'Все', color: 'bg-gray-500' },
+  { id: 'new', name: 'Новые', color: 'bg-green-600' },
+  { id: 'accepted', name: 'Принятые', color: 'bg-blue-600' },
+  { id: 'arrived', name: 'Прибыл', color: 'bg-yellow-600' },
+  { id: 'in_transit', name: 'В пути', color: 'bg-orange-500' },
+  { id: 'completed', name: 'Завершённые', color: 'bg-gray-600' },
+  { id: 'cancelled', name: 'Отменённые', color: 'bg-red-600' },
 ]
+
+// Подсчёт количества заказов по статусам - с сервера
+const tabCounts = computed(() => {
+  if (!props.stats) return {}
+  return {
+    all: props.stats.all || 0,
+    new: props.stats.new || 0,
+    accepted: props.stats.accepted || 0,
+    arrived: props.stats.arrived || 0,
+    in_transit: props.stats.in_transit || 0,
+    completed: props.stats.completed || 0,
+    cancelled: props.stats.cancelled || 0,
+  }
+})
 
 const filteredOrders = computed(() => {
   if (!props.orders) return []
-  if (activeTab.value === 'all') return props.orders
-  return props.orders.filter(o => o.status === activeTab.value)
+  // Заказы уже отфильтрованы сервером по статусу
+  return props.orders
 })
 
 const setTab = (id) => {
   activeTab.value = id
-  router.get(route('admin.orders'), { status: id }, { preserveState: true })
+  router.get(route('admin.orders'), { 
+    status: id,
+    date_from: dateFrom.value,
+    date_to: dateTo.value,
+  }, { preserveState: true })
 }
 
 const getStatusBadge = (status) => {
@@ -114,39 +215,53 @@ const getDate = (date) => {
       <h1 class="text-2xl font-bold text-white">Заказы</h1>
     </div>
 
-    <!-- Stats Cards -->
-    <div class="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Всего заказов</div>
-        <div class="text-2xl font-bold text-white">{{ stats.total || 0 }}</div>
+    <!-- Date Filters -->
+    <div class="mb-4 flex flex-wrap items-center gap-4">
+      <!-- Кнопки-фильтры -->
+      <div class="flex gap-2">
+        <button 
+          v-for="btn in dateButtons"
+          :key="btn.id"
+          @click="setDateFilter(btn)"
+          :class="[
+            'px-3 py-1.5 text-sm rounded-lg transition-all',
+            activeDateFilter === btn.id
+              ? 'bg-red-500 text-white' 
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          ]"
+        >
+          {{ btn.name }}
+        </button>
       </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Новые</div>
-        <div class="text-2xl font-bold text-blue-500">{{ stats.new || 0 }}</div>
-      </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">В пути</div>
-        <div class="text-2xl font-bold text-green-500">{{ stats.in_progress || 0 }}</div>
-      </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Завершено сегодня</div>
-        <div class="text-2xl font-bold text-yellow-500">{{ stats.today_completed || 0 }}</div>
-      </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Выручка сегодня</div>
-        <div class="text-2xl font-bold text-green-400">{{ formatPrice(stats.today_earnings || 0) }} ₽</div>
-      </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Выручка за месяц</div>
-        <div class="text-2xl font-bold text-yellow-400">{{ formatPrice(stats.month_earnings || 0) }} ₽</div>
-      </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Завершено</div>
-        <div class="text-2xl font-bold text-gray-500">{{ stats.completed || 0 }}</div>
-      </div>
-      <div class="rounded-xl bg-gray-800 p-4 border border-gray-700">
-        <div class="text-sm text-gray-400">Отменено</div>
-        <div class="text-2xl font-bold text-red-500">{{ stats.cancelled || 0 }}</div>
+
+      <!-- Выбор дат -->
+      <div class="flex items-center gap-2">
+        <input
+          type="date"
+          v-model="dateFrom"
+          @change="activeDateFilter = ''"
+          class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-white border border-gray-600"
+        />
+        <span class="text-gray-400">—</span>
+        <input
+          type="date"
+          v-model="dateTo"
+          @change="activeDateFilter = ''"
+          class="rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-white border border-gray-600"
+        />
+        <button
+          v-if="dateFrom || dateTo"
+          @click="clearDateFilter"
+          class="px-3 py-1.5 text-sm text-gray-400 hover:text-white"
+        >
+          ✕
+        </button>
+        <button
+          @click="applyFilters"
+          class="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500"
+        >
+          Применить
+        </button>
       </div>
     </div>
 
@@ -157,13 +272,15 @@ const getDate = (date) => {
         :key="tab.id"
         @click="setTab(tab.id)"
         :class="[
-          'px-4 py-2 text-sm font-medium transition-all',
+          'px-4 py-2 text-sm font-medium transition-all flex items-center gap-2',
           activeTab === tab.id
             ? 'border-b-2 border-red-500 text-red-500'
             : 'text-gray-400 hover:text-white'
         ]"
       >
+        <span :class="['w-2 h-2 rounded-full', tab.color]"></span>
         {{ tab.name }}
+        <span v-if="tabCounts[tab.id] > 0" class="ml-1 text-xs opacity-70">({{ tabCounts[tab.id] }})</span>
       </button>
     </div>
 
@@ -241,7 +358,7 @@ const getDate = (date) => {
         <button 
           v-for="page in pagination.last_page" 
           :key="page"
-          @click="router.get(route('admin.orders'), { page, status: activeTab }, { preserveState: true })"
+          @click="router.get(route('admin.orders'), { page, status: activeTab, date_from: dateFrom, date_to: dateTo }, { preserveState: true })"
           :class="[
             'rounded px-3 py-1 text-sm',
             page === pagination.current_page 

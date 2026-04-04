@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Driver;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -35,15 +37,19 @@ class DriverCancelOrderController extends Controller
             return response()->json(['error' => 'Заказ уже завершён или отменён'], 400);
         }
         
+        // Получаем время с учётом часового пояса
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone)->format('Y-m-d H:i:s.v');
+        
         // Отменяем заказ
         DB::table('orders')
             ->where('id', $order->id)
             ->update([
                 'status' => 'cancelled',
-                'cancelled_at' => DB::raw("GETDATE()"),
+                'cancelled_at' => DB::raw("CAST('$now' AS DATETIME2)"),
                 'cancelled_by' => 'driver',
                 'cancellation_reason' => $request->reason ?? 'Отменено водителем',
-                'updated_at' => DB::raw("GETDATE()"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
         
         // Освобождаем водителя
@@ -52,7 +58,7 @@ class DriverCancelOrderController extends Controller
             ->update([
                 'is_online' => true,
                 'can_accept_orders' => true,
-                'updated_at' => DB::raw("GETDATE()"),
+                'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
             ]);
         
         return response()->json([

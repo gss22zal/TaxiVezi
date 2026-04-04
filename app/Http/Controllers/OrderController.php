@@ -6,6 +6,8 @@ use App\Models\Order;
 use App\Models\Driver;
 use App\Models\Passenger;
 use App\Models\Tariff;
+use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -29,6 +31,10 @@ class OrderController extends Controller
             'distance' => 'required|numeric|min:0.1',
             'duration' => 'required|integer|min:1',
         ]);
+
+        // Получаем часовой пояс из настроек
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone)->format('Y-m-d H:i:s.v');
 
         // Находим passenger_id - из запроса или по текущему пользователю
         $passengerId = $request->passenger_id;
@@ -93,8 +99,8 @@ class OrderController extends Controller
             'surge_multiplier' => 1.0,
             'payment_method' => 'card',
             'payment_status' => 'pending',
-            'created_at' => DB::raw("GETDATE()"),
-            'updated_at' => DB::raw("GETDATE()"),
+            'created_at' => DB::raw("CAST('$now' AS DATETIME2)"),
+            'updated_at' => DB::raw("CAST('$now' AS DATETIME2)"),
         ]);
 
         $orderNumber = 'ORD-' . strtoupper(Str::random(6));

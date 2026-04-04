@@ -14,7 +14,7 @@ class SettingsSeeder extends Seeder
             ['key_name' => 'app.app_name', 'value' => 'TaxiVezi', 'type' => 'string', 'group_name' => 'general', 'description' => 'Название приложения'],
             ['key_name' => 'app.company_name', 'value' => 'Такси-сервис', 'type' => 'string', 'group_name' => 'general', 'description' => 'Название компании'],
             ['key_name' => 'app.currency', 'value' => 'RUB', 'type' => 'string', 'group_name' => 'general', 'description' => 'Валюта'],
-            ['key_name' => 'app.timezone', 'value' => 'Europe/Moscow', 'type' => 'string', 'group_name' => 'general', 'description' => 'Часовой пояс'],
+            ['key_name' => 'app.timezone', 'value' => 'Asia/Novosibirsk', 'type' => 'string', 'group_name' => 'general', 'description' => 'Часовой пояс'],
             ['key_name' => 'app.locale', 'value' => 'ru', 'type' => 'string', 'group_name' => 'general', 'description' => 'Язык интерфейса'],
 
             // API - Время повторения запросов

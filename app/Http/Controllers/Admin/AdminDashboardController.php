@@ -8,6 +8,9 @@ use App\Models\User;
 use App\Models\Driver;
 use App\Models\Passenger;
 use App\Models\Tariff;
+use App\Models\Setting;
+use App\Models\DailyRevenue;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -18,9 +21,14 @@ class AdminDashboardController extends Controller
      */
     public function index(Request $request)
     {
-        $today = now()->toDateString();
-        $weekAgo = now()->subDays(7)->toDateString();
-        $monthAgo = now()->subDays(30)->toDateString();
+        // Получаем часовой пояс из настроек (по умолчанию Europe/Moscow)
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        
+        // Создаём объект Carbon с учётом часового пояса
+        $now = Carbon::now($timezone);
+        $today = $now->toDateString();
+        $weekAgo = $now->copy()->subDays(7)->toDateString();
+        $monthAgo = $now->copy()->subDays(30)->toDateString();
 
         // Статистика за сегодня
         $statsToday = [
@@ -64,14 +72,33 @@ class AdminDashboardController extends Controller
             })->where('is_online', true)->count(),
         ];
 
-        // Выручка по дням за последние 7 дней
+        // Выручка по дням за последние 7 дней (из БД)
+        
+        // Обновляем данные за сегодня (чтобы они были актуальны)
+        DailyRevenue::updateForDate($today);
+        
+        // Получаем все данные за последние 7 дней
+        $dailyRevenues = DailyRevenue::getLastDays(7);
+        
+        // Создаём карту дат для быстрого поиска
+        $revenueMap = [];
+        foreach ($dailyRevenues as $dr) {
+            $drDate = $dr->date;
+            if ($drDate instanceof \Carbon\Carbon) {
+                $drDate = $drDate->format('Y-m-d');
+            }
+            $revenueMap[$drDate] = (float) $dr->revenue;
+        }
+        
+        // Создаём массив дат для последних 7 дней
         $revenueChart = [];
         for ($i = 6; $i >= 0; $i--) {
-            $date = now()->subDays($i)->toDateString();
-            $dayName = now()->subDays($i)->locale('ru')->isoFormat('ddd');
+            $date = $now->copy()->subDays($i)->toDateString();
+            $dayName = Carbon::parse($date)->locale('ru')->isoFormat('ddd');
+            
             $revenueChart[] = [
                 'day' => $dayName,
-                'value' => (float) Order::whereDate('completed_at', $date)->where('status', 'completed')->sum('final_price'),
+                'value' => $revenueMap[$date] ?? 0,
             ];
         }
 
@@ -126,7 +153,7 @@ class AdminDashboardController extends Controller
             ->orderByDesc('created_at')
             ->limit(5)
             ->get()
-            ->map(function ($order) {
+            ->map(function ($order) use ($timezone) {
                 $passengerName = $order->passenger?->user?->first_name 
                     ?? $order->passenger?->user?->name 
                     ?? 'Пассажир';
@@ -143,8 +170,8 @@ class AdminDashboardController extends Controller
                     default => 'Новый заказ ' . $order->order_number,
                 };
 
-                // Конвертируем время в московский часовой пояс для корректного отображения
-                $createdAt = $order->created_at->timezone('Europe/Moscow');
+                // Конвертируем время в часовой пояс из настроек для корректного отображения
+                $createdAt = $order->created_at->timezone($timezone);
 
                 return [
                     'type' => $order->status === 'completed' ? 'order' : 
