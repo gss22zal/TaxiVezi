@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { router } from '@inertiajs/vue3'
 import AdminLayout from '@/Layouts/AdminLayout.vue'
 
@@ -33,6 +33,59 @@ const dateFrom = ref(props.filters?.date_from || '')
 const dateTo = ref(props.filters?.date_to || '')
 
 const activeDateFilter = ref('')
+const openDropdown = ref(null)
+
+// Статусы для выпадающего меню
+const statuses = [
+  { id: 'new', name: 'Новый', class: 'bg-green-600' },
+  { id: 'accepted', name: 'Принят', class: 'bg-blue-600' },
+  { id: 'arrived', name: 'Прибыл', class: 'bg-yellow-600' },
+  { id: 'in_transit', name: 'В пути', class: 'bg-orange-500' },
+  { id: 'completed', name: 'Завершён', class: 'bg-gray-600' },
+  { id: 'cancelled', name: 'Отменён', class: 'bg-red-600' },
+]
+
+// Смена статуса заказа
+const changeStatus = async (order, newStatus) => {
+  try {
+    const response = await fetch(`/api/orders/${order.id}/status`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+      },
+      body: JSON.stringify({ status: newStatus })
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      // Обновляем заказ в списке
+      const idx = props.orders.findIndex(o => o.id === order.id)
+      if (idx !== -1) {
+        props.orders[idx].status = newStatus
+      }
+      openDropdown.value = null
+      // Перезагружаем страницу для обновления данных
+      router.reload({ only: ['orders', 'stats'] })
+    }
+  } catch (e) {
+    console.error('Error changing status:', e)
+  }
+}
+
+// Открыть/закрыть выпадающее меню
+const toggleDropdown = (orderId, event) => {
+  event.stopPropagation()
+  openDropdown.value = openDropdown.value === orderId ? null : orderId
+}
+
+// Закрыть меню при клике вне
+const closeDropdown = () => {
+  openDropdown.value = null
+}
+
+// Кнопки-фильтры - вычисляемые, зависят от serverDate
 
 // Кнопки-фильтры - вычисляемые, зависят от serverDate
 const dateButtons = computed(() => {
@@ -206,6 +259,14 @@ const getDate = (date) => {
   if (!date) return ''
   return new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
+
+onMounted(() => {
+  document.addEventListener('click', closeDropdown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeDropdown)
+})
 </script>
 
 <template>
@@ -294,9 +355,32 @@ const getDate = (date) => {
         <div class="mb-3 flex items-center justify-between">
           <div class="flex items-center gap-3">
             <span class="text-sm text-gray-400">{{ order.order_number || '№' + order.id }}</span>
-            <span :class="['rounded px-2 py-0.5 text-xs font-medium uppercase', getStatusBadge(order.status).class]">
-              {{ getStatusBadge(order.status).text }}
-            </span>
+            <!-- Выпадающее меню для смены статуса -->
+            <div class="relative">
+              <button 
+                @click.stop="toggleDropdown(order.id, $event)"
+                :class="['rounded px-2 py-0.5 text-xs font-medium uppercase cursor-pointer hover:opacity-80 transition-all', getStatusBadge(order.status).class]"
+              >
+                {{ getStatusBadge(order.status).text }} ▼
+              </button>
+              <div 
+                v-if="openDropdown === order.id"
+                class="absolute z-50 mt-1 left-0 w-40 rounded-lg bg-gray-700 border border-gray-600 shadow-lg overflow-hidden"
+              >
+                <button
+                  v-for="s in statuses"
+                  :key="s.id"
+                  @click.stop="changeStatus(order, s.id)"
+                  :class="[
+                    'w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-gray-600 transition-colors',
+                    order.status === s.id ? 'bg-gray-600' : ''
+                  ]"
+                >
+                  <span :class="['w-2 h-2 rounded-full', s.class]"></span>
+                  {{ s.name }}
+                </button>
+              </div>
+            </div>
             <!-- Рейтинг если есть отзыв -->
             <span v-if="order.review?.passenger_rating" class="flex items-center gap-1 text-yellow-400 text-sm">
               <span>★</span>

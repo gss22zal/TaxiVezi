@@ -73,10 +73,14 @@ class AppServiceProvider extends ServiceProvider
 
         // Статистика заказов для меню
         Inertia::share('orderStats', function () {
+            $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+            $today = \Carbon\Carbon::now($timezone)->toDateString();
+            
             return [
                 'new' => Order::where('status', 'new')->count(),
                 'accepted' => Order::where('status', 'accepted')->count(),
-                'in_progress' => Order::whereIn('status', ['accepted', 'arrived', 'started'])->count(),
+                'arrived' => Order::where('status', 'arrived')->count(),
+                'in_transit' => Order::where('status', 'in_transit')->count(),
             ];
         });
 

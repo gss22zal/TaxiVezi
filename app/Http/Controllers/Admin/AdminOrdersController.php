@@ -107,6 +107,12 @@ class AdminOrdersController extends Controller
             ],
             'serverDate' => $now->toDateString(),
             'stats' => $stats,
+            'orderStats' => [
+                'new' => Order::where('status', 'new')->count(),
+                'accepted' => Order::where('status', 'accepted')->count(),
+                'arrived' => Order::where('status', 'arrived')->count(),
+                'in_transit' => Order::where('status', 'in_transit')->count(),
+            ],
         ]);
     }
 }

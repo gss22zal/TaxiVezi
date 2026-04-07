@@ -171,11 +171,12 @@ const logout = () => {
               </svg>
               <span class="font-medium">{{ item.name }}</span>
             </div>
-            <!-- Счетчики для Заказов -->
+            <!-- Счетчики для Заказов - 4 статуса по цветовой схеме -->
             <div v-if="item.id === 'orders'" class="flex items-center gap-1">
-              <span v-if="item.stats?.new > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-blue-500 text-white">{{ item.stats.new }}</span>
-              <span v-if="item.stats?.accepted > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-yellow-500 text-gray-900">{{ item.stats.accepted }}</span>
-              <span v-if="item.stats?.in_progress > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-green-500 text-white">{{ item.stats.in_progress }}</span>
+              <span v-if="item.stats?.new > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-green-600 text-white">{{ item.stats.new }}</span>
+              <span v-if="item.stats?.accepted > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-blue-600 text-white">{{ item.stats.accepted }}</span>
+              <span v-if="item.stats?.arrived > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-yellow-600 text-gray-900">{{ item.stats.arrived }}</span>
+              <span v-if="item.stats?.in_transit > 0" class="px-1.5 py-0.5 rounded text-xs font-bold bg-orange-500 text-white">{{ item.stats.in_transit }}</span>
             </div>
             <span
               v-else-if="item.badge > 0"

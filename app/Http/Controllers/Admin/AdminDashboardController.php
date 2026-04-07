@@ -102,15 +102,36 @@ class AdminDashboardController extends Controller
             ];
         }
 
-        // Заказы по часам за сегодня
+        // Заказы по часам за сегодня (завершённые)
         $ordersChart = [];
+        $hours = [];
         for ($hour = 6; $hour <= 22; $hour += 2) {
-            $count = Order::whereDate('created_at', $today)
-                ->whereRaw("DATEPART(HOUR, created_at) = ?", [$hour])
-                ->count();
+            $hours[] = $hour;
+        }
+        
+        // Получаем все завершённые заказы за сегодня
+        $completedOrdersToday = Order::where('status', 'completed')
+            ->whereNotNull('completed_at')
+            ->whereDate('completed_at', $today)
+            ->get(['completed_at']);
+        
+        // Подсчитываем по часам
+        $hourlyCounts = array_fill(0, count($hours), 0);
+        foreach ($completedOrdersToday as $order) {
+            if ($order->completed_at) {
+                $hour = (int) $order->completed_at->format('H');
+                $idx = array_search($hour, $hours);
+                if ($idx !== false) {
+                    $hourlyCounts[$idx]++;
+                }
+            }
+        }
+        
+        foreach ($hours as $hour) {
+            $idx = array_search($hour, $hours);
             $ordersChart[] = [
                 'hour' => (string) $hour,
-                'value' => $count,
+                'value' => $hourlyCounts[$idx] ?? 0,
             ];
         }
 
@@ -193,7 +214,8 @@ class AdminDashboardController extends Controller
         $orderStats = [
             'new' => Order::where('status', 'new')->count(),
             'accepted' => Order::where('status', 'accepted')->count(),
-            'in_progress' => Order::whereIn('status', ['accepted', 'arrived', 'started'])->count(),
+            'arrived' => Order::where('status', 'arrived')->count(),
+            'in_transit' => Order::where('status', 'in_transit')->count(),
         ];
 
         return Inertia::render('Admin/Dashboard', [

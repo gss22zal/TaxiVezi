@@ -88,8 +88,13 @@ export function useOrderNotifications(options = {}) {
       // Обновляем предыдущее значение
       previousStats.value = newStats
       
-      // Обновляем глобально через Inertia
-      page.props.orderStats = newStats
+      // Обновляем глобально через Inertia (только нужные поля для UI)
+      page.props.orderStats = {
+        new: newStats.new || 0,
+        accepted: newStats.accepted || 0,
+        arrived: newStats.arrived || 0,
+        in_transit: newStats.in_transit || 0,
+      }
       
     } catch (e) {
       console.warn('Poll error:', e)

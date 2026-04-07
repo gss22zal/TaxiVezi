@@ -36,7 +36,7 @@ const formatPrice = (price) => {
 
 const getMaxOrders = () => {
   if (!props.orders_by_day) return 1
-  return Math.max(...props.orders_by_day.map(d => d.orders), 1)
+  return Math.max(...props.orders_by_day.map(d => d.completed), 1)
 }
 </script>
 
@@ -115,34 +115,19 @@ const getMaxOrders = () => {
 
     <!-- График заказов за неделю -->
     <div class="mb-6 rounded-xl bg-gray-800 p-6 border border-gray-700">
-      <h2 class="mb-4 text-lg font-semibold text-white">Заказы за последние 7 дней</h2>
+      <h2 class="mb-4 text-lg font-semibold text-white">Завершённые заказы за 7 дней</h2>
       <div class="flex items-end justify-between gap-2 h-40">
         <div 
           v-for="day in orders_by_day" 
           :key="day.date"
           class="flex flex-1 flex-col items-center gap-2"
         >
-          <div class="w-full flex flex-col items-center gap-1">
-            <div 
-              class="w-full max-w-8 rounded bg-yellow-500 transition-all"
-              :style="{ height: (day.orders / getMaxOrders() * 100) + 'px', minHeight: '4px' }"
-            ></div>
-            <div 
-              class="w-full max-w-8 rounded bg-green-500 transition-all"
-              :style="{ height: (day.completed / getMaxOrders() * 100) + 'px', minHeight: '4px' }"
-            ></div>
-          </div>
+          <span class="text-xs text-green-400 font-bold">{{ day.completed || '' }}</span>
+          <div 
+            class="w-full max-w-8 rounded bg-green-500 transition-all hover:bg-green-400"
+            :style="{ height: Math.max((day.completed / getMaxOrders() * 100), day.completed > 0 ? 8 : 0) + 'px', minHeight: day.completed > 0 ? '8px' : '0' }"
+          ></div>
           <span class="text-xs text-gray-400">{{ day.day_name }}</span>
-        </div>
-      </div>
-      <div class="mt-4 flex items-center gap-6 text-sm">
-        <div class="flex items-center gap-2">
-          <div class="h-3 w-3 rounded bg-yellow-500"></div>
-          <span class="text-gray-400">Всего заказов</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="h-3 w-3 rounded bg-green-500"></div>
-          <span class="text-gray-400">Выполнено</span>
         </div>
       </div>
     </div>

@@ -114,6 +114,10 @@ class OrderController extends Controller
      */
     public function index(Request $request)
     {
+        $timezone = Setting::get('app.timezone', 'Europe/Moscow');
+        $now = Carbon::now($timezone);
+        $today = $now->toDateString();
+        
         $query = Order::with([
             'passenger:id,user_id',
             'passenger.user:id,first_name,last_name,phone',
@@ -124,11 +128,20 @@ class OrderController extends Controller
             'review.driver.user:id,first_name,last_name',
             'review.passenger:id,user_id',
             'review.passenger.user:id,first_name,last_name',
+            'tariff:id,name,code',
         ])->orderByDesc('created_at');
 
         // Фильтр по статусу
         if ($request->has('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
+        }
+
+        // Фильтр по дате
+        if ($request->has('date_from') && $request->date_from) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->has('date_to') && $request->date_to) {
+            $query->whereDate('created_at', '<=', $request->date_to);
         }
 
         // Поиск
@@ -150,40 +163,47 @@ class OrderController extends Controller
                   });
             });
         }
-
-        // Фильтр по статусу
-        if ($request->has('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+        
+        // Базовый запрос с фильтрами
+        $baseQuery = Order::query();
+        
+        // Применяем фильтр по дате к базовому запросу
+        if ($request->has('date_from') && $request->date_from) {
+            $baseQuery->whereDate('created_at', '>=', $request->date_from);
         }
-
+        if ($request->has('date_to') && $request->date_to) {
+            $baseQuery->whereDate('created_at', '<=', $request->date_to);
+        }
+        
         $orders = $query->paginate(20);
 
-        // Статистика
+        // Статистика по статусам с учётом фильтров
         $stats = [
-            'total' => Order::count(),
-            'new' => Order::where('status', 'new')->count(),
-            'in_progress' => Order::whereIn('status', ['accepted', 'arrived', 'started'])->count(),
-            'completed' => Order::where('status', 'completed')->count(),
-            'cancelled' => Order::where('status', 'cancelled')->count(),
-            'today_completed' => Order::where('status', 'completed')
-                ->whereDate('completed_at', today())->count(),
-            'today_earnings' => Order::where('status', 'completed')
-                ->whereDate('completed_at', today())
-                ->sum('final_price'),
+            'all' => (clone $baseQuery)->count(),
+            'new' => (clone $baseQuery)->where('status', 'new')->count(),
+            'accepted' => (clone $baseQuery)->where('status', 'accepted')->count(),
+            'arrived' => (clone $baseQuery)->where('status', 'arrived')->count(),
+            'in_transit' => (clone $baseQuery)->where('status', 'in_transit')->count(),
+            'completed' => (clone $baseQuery)->where('status', 'completed')->count(),
+            'cancelled' => (clone $baseQuery)->where('status', 'cancelled')->count(),
         ];
 
         // Статистика для sidebar
         $dispatcherStats = [
-            'completed' => $stats['today_completed'],
-            'active' => Order::whereIn('status', ['new', 'accepted', 'arrived', 'started'])->count(),
-            'revenue' => $stats['today_earnings'] ?? 0,
+            'completed' => Order::where('status', 'completed')
+                ->whereDate('completed_at', $today)->count(),
+            'active' => Order::whereIn('status', ['new', 'accepted', 'arrived', 'started', 'in_transit'])->count(),
+            'revenue' => Order::where('status', 'completed')
+                ->whereDate('completed_at', $today)
+                ->sum('final_price'),
         ];
 
-        // Статистика заказов для меню (такая же как в AppServiceProvider)
+        // Статистика заказов для меню
         $orderStats = [
             'new' => Order::where('status', 'new')->count(),
             'accepted' => Order::where('status', 'accepted')->count(),
-            'in_progress' => Order::whereIn('status', ['accepted', 'arrived', 'started'])->count(),
+            'arrived' => Order::where('status', 'arrived')->count(),
+            'in_transit' => Order::where('status', 'in_transit')->count(),
         ];
 
         return Inertia::render('Dispatcher/Orders', [
@@ -197,10 +217,13 @@ class OrderController extends Controller
             'filters' => [
                 'search' => $request->search ?? '',
                 'status' => $request->status ?? 'all',
+                'date_from' => $request->date_from ?? '',
+                'date_to' => $request->date_to ?? '',
             ],
             'stats' => $stats,
             'dispatcherStats' => $dispatcherStats,
             'orderStats' => $orderStats,
+            'serverDate' => $today,
         ]);
     }
 
@@ -254,6 +277,12 @@ class OrderController extends Controller
                 'status' => $request->status ?? 'all',
                 'date_from' => $request->date_from ?? '',
                 'date_to' => $request->date_to ?? '',
+            ],
+            'orderStats' => [
+                'new' => Order::where('status', 'new')->count(),
+                'accepted' => Order::where('status', 'accepted')->count(),
+                'arrived' => Order::where('status', 'arrived')->count(),
+                'in_transit' => Order::where('status', 'in_transit')->count(),
             ],
         ]);
     }

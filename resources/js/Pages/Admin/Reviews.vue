@@ -28,8 +28,29 @@ const filteredReviews = computed(() => {
   if (ratingFilter.value !== 'all') {
     const rating = parseInt(ratingFilter.value)
     result = result.filter(r => {
-      const ratingValue = r.driver_rating || r.passenger_rating
-      return ratingValue === rating
+      // Взаимные отзывы - проверяем оба рейтинга
+      if (r.passenger_rating && r.driver_rating) {
+        const passengerMatch = r.passenger_rating === rating
+        const driverMatch = r.driver_rating === rating
+        
+        if (filterType.value === 'passenger') {
+          return passengerMatch
+        } else if (filterType.value === 'driver') {
+          return driverMatch
+        } else {
+          // Для "Все" - показываем если хотя бы один рейтинг совпадает
+          return passengerMatch || driverMatch
+        }
+      }
+      
+      // Одиночные отзывы
+      if (filterType.value === 'passenger') {
+        return r.passenger_rating === rating
+      } else if (filterType.value === 'driver') {
+        return r.driver_rating === rating
+      } else {
+        return r.passenger_rating === rating || r.driver_rating === rating
+      }
     })
   }
   
@@ -178,72 +199,165 @@ const getRatingClass = (rating) => {
         :key="review.id"
         class="rounded-lg bg-gray-800 p-4"
       >
-        <div class="flex items-start justify-between">
-          <div class="flex-1">
-            <!-- Заказ и дата -->
-            <div class="mb-2 flex items-center gap-3">
-              <span class="text-sm text-gray-400">Заказ #{{ review.order_id }}</span>
-              <span class="text-sm text-gray-500">{{ formatDate(review.created_at) }}</span>
+        <!-- Заказ и дата -->
+        <div class="mb-3 flex items-center gap-3">
+          <span class="text-sm text-gray-400">Заказ #{{ review.order_id }}</span>
+          <span class="text-sm text-gray-500">{{ formatDate(review.created_at) }}</span>
+        </div>
+
+        <!-- Взаимные отзывы - разделены на две колонки -->
+        <template v-if="review.passenger_rating && review.driver_rating">
+          <!-- При фильтре "Все" - две колонки -->
+          <div v-if="filterType === 'all'" class="grid grid-cols-2 gap-4">
+            <!-- Левая колонка - отзыв пассажира -->
+            <div class="rounded-lg bg-blue-500/10 p-4 border-l-4 border-l-blue-500">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-sm text-gray-400">От пассажира:</span>
+                <span class="font-medium text-white">
+                  {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
+                </span>
+              </div>
+              <div class="mb-2">
+                <span :class="['text-lg font-bold', getRatingClass(review.passenger_rating)]">
+                  {{ getRatingStars(review.passenger_rating) }}
+                  <span class="ml-2 text-sm text-gray-400">({{ review.passenger_rating }}/5)</span>
+                </span>
+              </div>
+              <div v-if="review.passenger_comment" class="mt-2 rounded bg-gray-700/50 p-3">
+                <div class="text-sm text-gray-400">Комментарий:</div>
+                <div class="text-white">{{ review.passenger_comment }}</div>
+              </div>
+              <div v-if="review.passenger_tags" class="mt-2 flex flex-wrap gap-2">
+                <span
+                  v-for="tag in (typeof review.passenger_tags === 'string' ? JSON.parse(review.passenger_tags) : review.passenger_tags)"
+                  :key="'p-' + tag"
+                  class="rounded-full bg-blue-500/20 px-3 py-1 text-xs text-blue-400"
+                >
+                  {{ tag }}
+                </span>
+              </div>
             </div>
 
-            <!-- От кого и кому -->
-            <div class="mb-2 flex items-center gap-4">
-              <!-- Если есть passenger_rating - это отзыв пассажира водителю -->
-              <template v-if="review.passenger_rating">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm text-gray-400">От пассажира:</span>
-                  <span class="font-medium text-white">
-                    {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-sm text-gray-400">Водителю:</span>
-                  <span class="font-medium text-white">
-                    {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
-                  </span>
-                </div>
-              </template>
-              <!-- Если есть driver_rating - это отзыв водителя пассажиру -->
-              <template v-else-if="review.driver_rating">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm text-gray-400">От водителя:</span>
-                  <span class="font-medium text-white">
-                    {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-sm text-gray-400">Пассажиру:</span>
-                  <span class="font-medium text-white">
-                    {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
-                  </span>
-                </div>
-              </template>
+            <!-- Правая колонка - отзыв водителя -->
+            <div class="rounded-lg bg-yellow-500/10 p-4 border-r-4 border-r-yellow-500">
+              <div class="flex items-center gap-2 mb-2 justify-end">
+                <span class="text-sm text-gray-400">От водителя:</span>
+                <span class="font-medium text-white">
+                  {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
+                </span>
+              </div>
+              <div class="mb-2 flex justify-end">
+                <span :class="['text-lg font-bold', getRatingClass(review.driver_rating)]">
+                  {{ getRatingStars(review.driver_rating) }}
+                  <span class="ml-2 text-sm text-gray-400">({{ review.driver_rating }}/5)</span>
+                </span>
+              </div>
+              <div v-if="review.driver_comment" class="mt-2 rounded bg-gray-700/50 p-3">
+                <div class="text-sm text-gray-400 text-right">Комментарий:</div>
+                <div class="text-white text-right">{{ review.driver_comment }}</div>
+              </div>
+              <div v-if="review.driver_tags" class="mt-2 flex flex-wrap gap-2 justify-end">
+                <span
+                  v-for="tag in (typeof review.driver_tags === 'string' ? JSON.parse(review.driver_tags) : review.driver_tags)"
+                  :key="'d-' + tag"
+                  class="rounded-full bg-yellow-500/20 px-3 py-1 text-xs text-yellow-400"
+                >
+                  {{ tag }}
+                </span>
+              </div>
             </div>
+          </div>
 
-            <!-- Рейтинг -->
+          <!-- При фильтре "Пассажир" - только отзыв пассажира на всю ширину слева -->
+          <div v-else-if="filterType === 'passenger'" class="flex">
+            <div class="rounded-lg bg-blue-500/10 p-4 border-l-4 border-l-blue-500 w-full md:w-1/2">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-sm text-gray-400">От пассажира:</span>
+                <span class="font-medium text-white">
+                  {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
+                </span>
+              </div>
+              <div class="mb-2">
+                <span :class="['text-lg font-bold', getRatingClass(review.passenger_rating)]">
+                  {{ getRatingStars(review.passenger_rating) }}
+                  <span class="ml-2 text-sm text-gray-400">({{ review.passenger_rating }}/5)</span>
+                </span>
+              </div>
+              <div v-if="review.passenger_comment" class="mt-2 rounded bg-gray-700/50 p-3">
+                <div class="text-sm text-gray-400">Комментарий:</div>
+                <div class="text-white">{{ review.passenger_comment }}</div>
+              </div>
+              <div v-if="review.passenger_tags" class="mt-2 flex flex-wrap gap-2">
+                <span
+                  v-for="tag in (typeof review.passenger_tags === 'string' ? JSON.parse(review.passenger_tags) : review.passenger_tags)"
+                  :key="'p-' + tag"
+                  class="rounded-full bg-blue-500/20 px-3 py-1 text-xs text-blue-400"
+                >
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- При фильтре "Водитель" - только отзыв водителя на всю ширину справа -->
+          <div v-else class="flex justify-end">
+            <div class="rounded-lg bg-yellow-500/10 p-4 border-r-4 border-r-yellow-500 w-full md:w-1/2">
+              <div class="flex items-center gap-2 mb-2 justify-end">
+                <span class="text-sm text-gray-400">От водителя:</span>
+                <span class="font-medium text-white">
+                  {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
+                </span>
+              </div>
+              <div class="mb-2 flex justify-end">
+                <span :class="['text-lg font-bold', getRatingClass(review.driver_rating)]">
+                  {{ getRatingStars(review.driver_rating) }}
+                  <span class="ml-2 text-sm text-gray-400">({{ review.driver_rating }}/5)</span>
+                </span>
+              </div>
+              <div v-if="review.driver_comment" class="mt-2 rounded bg-gray-700/50 p-3">
+                <div class="text-sm text-gray-400 text-right">Комментарий:</div>
+                <div class="text-white text-right">{{ review.driver_comment }}</div>
+              </div>
+              <div v-if="review.driver_tags" class="mt-2 flex flex-wrap gap-2 justify-end">
+                <span
+                  v-for="tag in (typeof review.driver_tags === 'string' ? JSON.parse(review.driver_tags) : review.driver_tags)"
+                  :key="'d-' + tag"
+                  class="rounded-full bg-yellow-500/20 px-3 py-1 text-xs text-yellow-400"
+                >
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Только отзыв пассажира -->
+        <template v-else-if="review.passenger_rating && (filterType === 'all' || filterType === 'passenger')">
+          <div class="rounded-lg bg-blue-500/10 p-4 border-l-4 border-l-blue-500" :class="filterType === 'passenger' ? 'mr-auto' : ''">
+            <div class="flex items-center gap-4 mb-2">
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-400">От пассажира:</span>
+                <span class="font-medium text-white">
+                  {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-400">Водителю:</span>
+                <span class="font-medium text-white">
+                  {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
+                </span>
+              </div>
+            </div>
             <div class="mb-2">
-              <span v-if="review.passenger_rating" :class="['text-lg font-bold', getRatingClass(review.passenger_rating)]">
+              <span :class="['text-lg font-bold', getRatingClass(review.passenger_rating)]">
                 {{ getRatingStars(review.passenger_rating) }}
                 <span class="ml-2 text-sm text-gray-400">(оценка пассажира: {{ review.passenger_rating }}/5)</span>
               </span>
-              <span v-if="review.driver_rating" :class="['text-lg font-bold', getRatingClass(review.driver_rating)]">
-                {{ getRatingStars(review.driver_rating) }}
-                <span class="ml-2 text-sm text-gray-400">(оценка водителя: {{ review.driver_rating }}/5)</span>
-              </span>
             </div>
-
-            <!-- Комментарий -->
             <div v-if="review.passenger_comment" class="mt-2 rounded bg-gray-700 p-3">
               <div class="text-sm text-gray-400">Комментарий пассажира:</div>
               <div class="text-white">{{ review.passenger_comment }}</div>
             </div>
-            
-            <div v-if="review.driver_comment" class="mt-2 rounded bg-gray-700 p-3">
-              <div class="text-sm text-gray-400">Комментарий водителя:</div>
-              <div class="text-white">{{ review.driver_comment }}</div>
-            </div>
-
-            <!-- Теги пассажира -->
             <div v-if="review.passenger_tags" class="mt-2 flex flex-wrap gap-2">
               <span
                 v-for="tag in (typeof review.passenger_tags === 'string' ? JSON.parse(review.passenger_tags) : review.passenger_tags)"
@@ -253,9 +367,37 @@ const getRatingClass = (rating) => {
                 {{ tag }}
               </span>
             </div>
+          </div>
+        </template>
 
-            <!-- Теги водителя -->
-            <div v-if="review.driver_tags" class="mt-2 flex flex-wrap gap-2">
+        <!-- Только отзыв водителя -->
+        <template v-else-if="review.driver_rating && (filterType === 'all' || filterType === 'driver')">
+          <div class="rounded-lg bg-yellow-500/10 p-4 border-r-4 border-r-yellow-500" :class="filterType === 'driver' ? 'ml-auto' : ''">
+            <div class="flex items-center gap-4 mb-2 justify-end">
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-400">От водителя:</span>
+                <span class="font-medium text-white">
+                  {{ review.driver?.user?.first_name }} {{ review.driver?.user?.last_name || 'Водитель' }}
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-400">Пассажиру:</span>
+                <span class="font-medium text-white">
+                  {{ review.passenger?.user?.first_name }} {{ review.passenger?.user?.last_name || 'Пассажир' }}
+                </span>
+              </div>
+            </div>
+            <div class="mb-2 flex justify-end">
+              <span :class="['text-lg font-bold', getRatingClass(review.driver_rating)]">
+                {{ getRatingStars(review.driver_rating) }}
+                <span class="ml-2 text-sm text-gray-400">(оценка водителя: {{ review.driver_rating }}/5)</span>
+              </span>
+            </div>
+            <div v-if="review.driver_comment" class="mt-2 rounded bg-gray-700 p-3">
+              <div class="text-sm text-gray-400 text-right">Комментарий водителя:</div>
+              <div class="text-white text-right">{{ review.driver_comment }}</div>
+            </div>
+            <div v-if="review.driver_tags" class="mt-2 flex flex-wrap gap-2 justify-end">
               <span
                 v-for="tag in (typeof review.driver_tags === 'string' ? JSON.parse(review.driver_tags) : review.driver_tags)"
                 :key="'d-' + tag"
@@ -265,7 +407,7 @@ const getRatingClass = (rating) => {
               </span>
             </div>
           </div>
-        </div>
+        </template>
       </div>
 
       <div v-if="filteredReviews.length === 0" class="py-8 text-center text-gray-400">

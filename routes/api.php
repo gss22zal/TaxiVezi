@@ -5,9 +5,15 @@ use App\Http\Controllers\Api\OrderStatsController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\PassengerOrderHistoryController;
 use App\Http\Controllers\Api\PassengerOrderHideController;
+use App\Http\Controllers\Api\UpdateOrderStatusController;
 
 
 Route::get('/order-stats', OrderStatsController::class)->middleware('web');
+
+// Смена статуса заказа (диспетчер/админ)
+Route::middleware(['web', 'auth'])->group(function () {
+    Route::put('/orders/{order}/status', UpdateOrderStatusController::class);
+});
 
 // Роуты для отзывов
 Route::middleware(['web', 'auth'])->group(function () {

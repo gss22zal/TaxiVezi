@@ -12,6 +12,8 @@ use App\Http\Controllers\Admin\AdminCarsController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminReviewsController;
 use App\Http\Controllers\Admin\AdminSettingsController;
+use App\Http\Controllers\Admin\AdminTransactionsController;
+use App\Http\Controllers\Admin\AdminPayoutsController;
 use App\Http\Controllers\Driver\CarController;
 use App\Http\Controllers\Dispatcher\DispatcherReviewsController;
 use App\Http\Controllers\Api\OrderStatsController;
@@ -174,13 +176,9 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
     // Отменённые заказы
     Route::get('/orders/cancelled', [AdminCancelledOrdersController::class, 'index'])->name('admin.orders.cancelled');
 
-    Route::get('/finance/transactions', function () {
-        return Inertia::render('Admin/Finance/Transactions');
-    })->name('admin.finance.transactions');
+    Route::get('/finance/transactions', [AdminTransactionsController::class, 'index'])->name('admin.finance.transactions');
 
-    Route::get('/finance/payouts', function () {
-        return Inertia::render('Admin/Finance/Payouts');
-    })->name('admin.finance.payouts');
+    Route::get('/finance/payouts', [AdminPayoutsController::class, 'index'])->name('admin.finance.payouts');
 
     Route::get('/finance/taxes', function () {
         return Inertia::render('Admin/Finance/Taxes');

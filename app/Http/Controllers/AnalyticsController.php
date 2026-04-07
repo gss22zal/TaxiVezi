@@ -66,10 +66,10 @@ class AnalyticsController extends Controller
         $ordersByDay = [];
         for ($i = 6; $i >= 0; $i--) {
             $date = now()->subDays($i)->toDateString();
+            $dayName = now()->subDays($i)->locale('ru')->isoFormat('ddd');
             $ordersByDay[] = [
                 'date' => now()->subDays($i)->format('d.m'),
-                'day_name' => now()->subDays($i)->format('D'),
-                'orders' => Order::whereDate('created_at', $date)->count(),
+                'day_name' => $dayName,
                 'completed' => Order::whereDate('completed_at', $date)->where('status', 'completed')->count(),
                 'earnings' => Order::whereDate('completed_at', $date)->where('status', 'completed')->sum('final_price'),
             ];

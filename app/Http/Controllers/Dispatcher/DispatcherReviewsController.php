@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Dispatcher;
 
 use App\Http\Controllers\Controller;
 use App\Models\Review;
+use App\Models\Driver;
+use App\Models\Passenger;
 use Illuminate\Http\Request;
 
 class DispatcherReviewsController extends Controller
@@ -21,15 +23,23 @@ class DispatcherReviewsController extends Controller
             ->limit(100)
             ->get();
 
+        // Статистика
         $allReviews = Review::whereNotNull('passenger_rating')->get();
         
         $stats = [
             'total' => $allReviews->count(),
             'avgRating' => $allReviews->avg('passenger_rating') ? round($allReviews->avg('passenger_rating'), 1) : 0,
+            'fiveStars' => $allReviews->where('passenger_rating', 5)->count(),
+            'fourStars' => $allReviews->where('passenger_rating', 4)->count(),
+            'threeStars' => $allReviews->where('passenger_rating', 3)->count(),
+            'twoStars' => $allReviews->where('passenger_rating', 2)->count(),
+            'oneStar' => $allReviews->where('passenger_rating', 1)->count(),
         ];
 
         return inertia('Dispatcher/Reviews', [
             'reviews' => $reviews,
+            'drivers' => Driver::with('user:id,first_name,last_name')->get(),
+            'passengers' => Passenger::with('user:id,first_name,last_name')->get(),
             'stats' => $stats,
         ]);
     }
