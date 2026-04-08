@@ -1,6 +1,6 @@
 <script setup>
+import { ref, computed } from 'vue'
 import { Link, usePage, router } from '@inertiajs/vue3'
-import { computed } from 'vue'
 
 const props = defineProps({
   activeRole: {
@@ -12,6 +12,103 @@ const props = defineProps({
 const emit = defineEmits(['role-change'])
 
 const page = usePage()
+
+// Данные профиля из page.props
+const user = computed(() => page.props?.passenger?.user || page.props?.driver?.user || {})
+
+// Состояние popup профиля
+const showProfileModal = ref(false)
+const isLoading = ref(false)
+const isSaving = ref(false)
+const error = ref('')
+const success = ref('')
+
+// Форма профиля
+const profileForm = ref({
+  first_name: '',
+  last_name: '',
+  phone: '',
+  email: '',
+  current_password: '',
+  new_password: '',
+  new_password_confirmation: ''
+})
+
+// Открыть popup профиля
+const openProfileModal = () => {
+  profileForm.value = {
+    first_name: user.value.first_name || '',
+    last_name: user.value.last_name || '',
+    phone: user.value.phone || '',
+    email: user.value.email || '',
+    current_password: '',
+    new_password: '',
+    new_password_confirmation: ''
+  }
+  error.value = ''
+  success.value = ''
+  showProfileModal.value = true
+}
+
+// Закрыть popup
+const closeProfileModal = () => {
+  showProfileModal.value = false
+}
+
+// Получить CSRF токен
+const getCsrfToken = () => {
+  const cookieToken = document.cookie
+    .split('; ')
+    .find(row => row.startsWith('XSRF-TOKEN='))
+    ?.split('=')[1]
+  if (cookieToken) return decodeURIComponent(cookieToken)
+  return document.querySelector('meta[name="csrf-token"]')?.content || ''
+}
+
+// Сохранить профиль
+const saveProfile = async () => {
+  error.value = ''
+  success.value = ''
+  isSaving.value = true
+
+  try {
+    const response = await fetch('/api/passenger/profile', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'X-XSRF-TOKEN': getCsrfToken(),
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        first_name: profileForm.value.first_name,
+        last_name: profileForm.value.last_name,
+        phone: profileForm.value.phone,
+        email: profileForm.value.email,
+        current_password: profileForm.value.current_password || null,
+        new_password: profileForm.value.new_password || null,
+        new_password_confirmation: profileForm.value.new_password_confirmation || null
+      })
+    })
+
+    const data = await response.json()
+
+    if (response.ok && data.success) {
+      success.value = 'Данные сохранены!'
+      setTimeout(() => {
+        closeProfileModal()
+        // Перезагрузить страницу для обновления данных
+        router.reload({ only: ['passenger', 'driver'] })
+      }, 1000)
+    } else {
+      error.value = data.error || data.message || 'Ошибка сохранения'
+    }
+  } catch (e) {
+    error.value = 'Ошибка соединения'
+  } finally {
+    isSaving.value = false
+  }
+}
 
 const currentDate = computed(() => {
   const now = new Date()
@@ -54,7 +151,7 @@ const logout = () => {
         </div>
 
         <!-- Right Section -->
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
           <div class="text-right">
             <div class="text-sm font-medium text-gray-300">{{ currentDate }}</div>
             <div class="flex items-center justify-end gap-1">
@@ -62,6 +159,19 @@ const logout = () => {
               <span class="text-xs text-green-500">Онлайн</span>
             </div>
           </div>
+          
+          <!-- Кнопка профиля -->
+          <button
+            @click="openProfileModal"
+            class="flex items-center gap-1 rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-yellow-500 hover:text-gray-900 transition"
+            title="Профиль"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+          </button>
+          
+          <!-- Кнопка выхода -->
           <button
             @click="logout"
             class="flex items-center gap-1 rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-red-600 hover:text-white transition"
@@ -125,5 +235,117 @@ const logout = () => {
     <main class="px-4 py-6">
       <slot />
     </main>
+
+    <!-- Popup профиля -->
+    <div v-if="showProfileModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+      <div class="w-full max-w-md rounded-2xl bg-gray-800 p-6 shadow-2xl">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-xl font-bold text-white">Профиль</h2>
+          <button @click="closeProfileModal" class="text-gray-400 hover:text-white">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Сообщения -->
+        <div v-if="error" class="mb-4 rounded-lg bg-red-500/20 p-3 text-sm text-red-400">
+          {{ error }}
+        </div>
+        <div v-if="success" class="mb-4 rounded-lg bg-green-500/20 p-3 text-sm text-green-400">
+          {{ success }}
+        </div>
+
+        <form @submit.prevent="saveProfile" class="space-y-4">
+          <div>
+            <label class="mb-1 block text-sm text-gray-400">Имя</label>
+            <input
+              v-model="profileForm.first_name"
+              type="text"
+              required
+              class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+            />
+          </div>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-400">Фамилия</label>
+            <input
+              v-model="profileForm.last_name"
+              type="text"
+              class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+            />
+          </div>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-400">Телефон</label>
+            <input
+              v-model="profileForm.phone"
+              type="tel"
+              class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+            />
+          </div>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-400">Email</label>
+            <input
+              v-model="profileForm.email"
+              type="email"
+              required
+              class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+            />
+          </div>
+
+          <div class="border-t border-gray-700 pt-4">
+            <p class="mb-3 text-sm text-gray-400">Изменить пароль (необязательно)</p>
+            
+            <div class="space-y-3">
+              <div>
+                <label class="mb-1 block text-sm text-gray-400">Текущий пароль</label>
+                <input
+                  v-model="profileForm.current_password"
+                  type="password"
+                  class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+                />
+              </div>
+
+              <div>
+                <label class="mb-1 block text-sm text-gray-400">Новый пароль</label>
+                <input
+                  v-model="profileForm.new_password"
+                  type="password"
+                  class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+                />
+              </div>
+
+              <div>
+                <label class="mb-1 block text-sm text-gray-400">Подтвердите пароль</label>
+                <input
+                  v-model="profileForm.new_password_confirmation"
+                  type="password"
+                  class="w-full rounded-lg border-0 bg-gray-700 p-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button
+              type="button"
+              @click="closeProfileModal"
+              class="flex-1 rounded-lg bg-gray-700 py-3 font-semibold text-white transition-colors hover:bg-gray-600"
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              :disabled="isSaving"
+              class="flex-1 rounded-lg bg-yellow-500 py-3 font-semibold text-gray-900 transition-colors hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {{ isSaving ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>

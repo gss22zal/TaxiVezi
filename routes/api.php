@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\OrderStatsController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\PassengerOrderHistoryController;
+use App\Http\Controllers\Api\PassengerProfileController;
 use App\Http\Controllers\Api\PassengerOrderHideController;
 use App\Http\Controllers\Api\UpdateOrderStatusController;
 
@@ -34,6 +35,12 @@ Route::middleware(['web', 'auth'])->group(function () {
 Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/passenger/orders/history', PassengerOrderHistoryController::class);
     Route::post('/passenger/orders/{order}/hide', PassengerOrderHideController::class);
+});
+
+// Пассажир - профиль
+Route::middleware(['web', 'auth'])->group(function () {
+    Route::get('/passenger/profile', [PassengerProfileController::class, 'show']);
+    Route::put('/passenger/profile', [PassengerProfileController::class, 'update']);
 });
 
 // Водитель - история заказов

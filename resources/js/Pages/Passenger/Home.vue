@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { router } from '@inertiajs/vue3'
 import MainLayout from '@/Layouts/MainLayout.vue'
 
@@ -11,8 +11,15 @@ const props = defineProps({
   passenger: {
     type: Object,
     default: null
+  },
+  mapsSettings: {
+    type: Object,
+    default: () => ({})
   }
 })
+
+// Настройки карт из props
+const mapsSettings = computed(() => props.mapsSettings || {})
 
 const form = ref({
   from: '',
@@ -22,6 +29,21 @@ const form = ref({
   duration: 20,
   notes: ''
 })
+
+// Состояние карты
+const showMap = ref(false)
+const mapMode = ref('from') // 'from' или 'to'
+const fromCoords = ref(null)
+const toCoords = ref(null)
+const mapCenter = ref([53.990061, 84.746699]) // Новосибирск
+const mapInstance = ref(null)
+const fromPlacemark = ref(null)
+const toPlacemark = ref(null)
+
+// Состояние поиска адресов
+const fromInputRef = ref(null)
+const toInputRef = ref(null)
+let ymaps = null
 
 const isSubmitting = ref(false)
 const calculatedPrice = ref(null)
@@ -42,7 +64,7 @@ const reviewRating = ref(5)
 const reviewComment = ref('')
 const reviewTags = ref([])
 const isSubmittingReview = ref(false)
-const lastCompletedOrderId = ref(null) // ✅ Исправлено: теперь это ref
+const lastCompletedOrderId = ref(null) //  Исправлено: теперь это ref
 const hasReviewForLastOrder = ref(false) // Проверка: есть ли отзыв для последнего завершённого заказа
 
 // История заказов
@@ -55,7 +77,7 @@ const pagination = ref({
   last_page: 1
 })
 
-// ✅ Проверка, оставлен ли отзыв на заказ
+//  Проверка, оставлен ли отзыв на заказ
 const checkReviewExists = async (orderId) => {
  try {
  const response = await fetch(`/api/passenger/orders/${orderId}/review/check`, {
@@ -74,7 +96,7 @@ const checkReviewExists = async (orderId) => {
  }
 }
 
-// ✅ Загрузка истории заказов
+//  Загрузка истории заказов
 const loadOrderHistory = async (page = 1) => {
   isLoadingHistory.value = true
   try {
@@ -103,14 +125,14 @@ const loadOrderHistory = async (page = 1) => {
   }
 }
 
-// ✅ Переключение страницы
+//  Переключение страницы
 const changePage = (page) => {
   if (page >= 1 && page <= pagination.value.last_page) {
     loadOrderHistory(page)
   }
 }
 
-// ✅ Скрыть заказ из истории
+//  Скрыть заказ из истории
 const hideFromHistory = async (orderId) => {
   if (!confirm('Удалить этот заказ из истории?')) return
   
@@ -125,7 +147,6 @@ const hideFromHistory = async (orderId) => {
     })
     
     const data = await response.json()
-    console.log('Hide order response:', data)
 
     if (response.ok && data.success) {
       // Удаляем заказ из локального списка
@@ -142,7 +163,7 @@ const hideFromHistory = async (orderId) => {
   }
 }
 
-// ✅ Повторить заказ из истории
+//  Повторить заказ из истории
 const repeatFromHistory = (order) => {
   form.value.from = order.pickup_address
   form.value.to = order.dropoff_address
@@ -156,7 +177,7 @@ const repeatFromHistory = (order) => {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-// ✅ Форматирование даты
+//  Форматирование даты
 const formatDate = (dateString) => {
   if (!dateString) return ''
   const date = new Date(dateString)
@@ -201,8 +222,454 @@ const orderStatusColor = {
   'cancelled': 'red'
 }
 
-// ✅ AudioContext создаётся один раз при монтировании
+//  AudioContext создаётся один раз при монтировании
 let audioContext = null
+
+// Загрузка Яндекс Карт
+const loadYandexMaps = () => {
+  return new Promise((resolve, reject) => {
+    if (window.ymaps) {
+      ymaps = window.ymaps
+      resolve()
+      return
+    }
+    
+    const apiKey = mapsSettings.value?.yandex_maps_api_key || ''
+    if (!apiKey) {
+      reject(new Error('No API key'))
+      return
+    }
+    
+    const script = document.createElement('script')
+    script.src = `https://api-maps.yandex.ru/2.1/?apikey=${apiKey}&lang=ru_RU`
+    script.onload = () => {
+      ymaps = window.ymaps
+      resolve()
+    }
+    script.onerror = reject
+    document.head.appendChild(script)
+  })
+}
+
+// Инициализация поиска адресов
+const initAddressSearch = async () => {
+  const apiKey = mapsSettings.value?.yandex_maps_api_key
+  
+  if (!apiKey) {
+    console.log('No Yandex Maps API key')
+    return
+  }
+  
+  try {
+    await loadYandexMaps()
+    console.log('Yandex Maps loaded')
+    
+    // Кастомный поиск адресов через input
+    setupCustomAddressSearch('from-input', (address) => {
+      form.value.from = address
+      calculateRouteDistance()
+    })
+    
+    setupCustomAddressSearch('to-input', (address) => {
+      form.value.to = address
+      calculateRouteDistance()
+    })
+  } catch (e) {
+    console.warn('Yandex Maps not loaded:', e)
+  }
+}
+
+// Кастомный поиск адресов
+const setupCustomAddressSearch = (inputId, onSelect) => {
+  const input = document.getElementById(inputId)
+  if (!input) return
+  
+  let suggestPanel = null
+  let currentRequest = null
+  
+  const showSuggestions = (results) => {
+    // Удаляем старую панель
+    if (suggestPanel) {
+      suggestPanel.remove()
+    }
+    
+    if (results.length === 0) return
+    
+    // Создаём панель подсказок
+    suggestPanel = document.createElement('div')
+    suggestPanel.className = 'suggest-panel'
+    suggestPanel.style.cssText = `
+      position: absolute;
+      z-index: 9999;
+      background: #1F2937;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      max-height: 250px;
+      overflow-y: auto;
+      margin-top: 4px;
+      width: 100%;
+      left: 0;
+      right: 0;
+    `
+    
+    results.forEach(item => {
+      const div = document.createElement('div')
+      div.className = 'suggest-item'
+      div.style.cssText = `
+        padding: 10px 12px;
+        cursor: pointer;
+        color: white;
+        border-bottom: 1px solid #374151;
+      `
+      div.textContent = item.displayName
+      div.addEventListener('click', () => {
+        onSelect(item.displayName)
+        if (suggestPanel) {
+          suggestPanel.remove()
+          suggestPanel = null
+        }
+      })
+      div.addEventListener('mouseenter', () => {
+        div.style.backgroundColor = '#374151'
+      })
+      div.addEventListener('mouseleave', () => {
+        div.style.backgroundColor = 'transparent'
+      })
+      suggestPanel.appendChild(div)
+    })
+    
+    // Добавляем после инпута
+    const parent = input.parentElement
+    parent.style.position = 'relative'
+    parent.appendChild(suggestPanel)
+  }
+  
+  const fetchSuggestions = async (query) => {
+    if (query.length < 3) {
+      if (suggestPanel) {
+        suggestPanel.remove()
+        suggestPanel = null
+      }
+      return
+    }
+    
+    const apiKey = mapsSettings.value?.yandex_maps_api_key
+    if (!apiKey) return
+    
+    // Отменяем предыдущий запрос
+    if (currentRequest) {
+      currentRequest.abort()
+    }
+    
+    currentRequest = new AbortController()
+    
+    try {
+      const url = `https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&geocode=${encodeURIComponent(query)}&format=json&results=5&kind=house,street,metro`
+      
+      const response = await fetch(url, { signal: currentRequest.signal })
+      const data = await response.json()
+      
+      if (data.response?.GeoObjectCollection?.featureMember) {
+        const results = data.response.GeoObjectCollection.featureMember.map(item => ({
+          displayName: item.GeoObject.metaDataProperty.GeocoderMetaData.text,
+          address: item.GeoObject.metaDataProperty.GeocoderMetaData.address.formatted,
+          pos: item.GeoObject.Point.pos
+        }))
+        showSuggestions(results)
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        console.warn('Geocoder error:', e)
+      }
+    }
+  }
+  
+  let debounceTimer = null
+  
+  input.addEventListener('input', (e) => {
+    const query = e.target.value.trim()
+    
+    // Очищаем таймер
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+    }
+    
+    // Задержка перед запросом (debounce)
+    debounceTimer = setTimeout(() => {
+      fetchSuggestions(query)
+    }, 300)
+  })
+  
+  // Закрываем панель при клике вне
+  document.addEventListener('click', (e) => {
+    if (suggestPanel && !input.contains(e.target) && !suggestPanel.contains(e.target)) {
+      suggestPanel.remove()
+      suggestPanel = null
+    }
+  })
+}
+
+// Открыть карту для выбора точки
+const openMapSelector = (mode) => {
+  mapMode.value = mode
+  showMap.value = true
+  
+  nextTick(() => {
+    // Небольшая задержка чтобы DOM успел отрисоваться
+    setTimeout(() => {
+      initMap()
+    }, 100)
+  })
+}
+
+// Инициализация карты
+const initMap = async () => {
+  const mapContainer = document.getElementById('map-container')
+  if (!mapContainer) return
+  
+  // Если карта уже инициализирована - просто обновляем состояние
+  if (mapInstance.value && mapInstance.value.geometry) {
+    // Очищаем старые метки и маршруты
+    try {
+      mapInstance.value.geoObjects.removeAll()
+    } catch (e) {
+      console.warn('Error clearing geoObjects:', e)
+    }
+    fromPlacemark.value = null
+    toPlacemark.value = null
+    
+    // Добавляем существующие метки
+    if (fromCoords.value) {
+      addPlacemark(fromCoords.value, 'from')
+    }
+    if (toCoords.value) {
+      addPlacemark(toCoords.value, 'to')
+    }
+    
+    // Центрируем карту
+    if (fromCoords.value || toCoords.value) {
+      const bounds = []
+      if (fromCoords.value) bounds.push(fromCoords.value)
+      if (toCoords.value) bounds.push(toCoords.value)
+      if (bounds.length > 0) {
+        mapInstance.value.setBounds(bounds, { checkZoomRange: true, duration: 300 })
+      }
+    }
+    
+    return
+  }
+  
+  try {
+    await loadYandexMaps()
+    
+    ymaps.ready(() => {
+      // Создаём карту
+      mapInstance.value = new ymaps.Map('map-container', {
+        center: mapCenter.value,
+        zoom: 12,
+        controls: ['zoomControl', 'geolocationControl']
+      })
+      
+      // Обработчик клика по карте
+      mapInstance.value.events.add('click', async (e) => {
+        const coords = e.get('coords')
+        if (coords && Array.isArray(coords) && coords.length >= 2) {
+          await selectPoint(coords)
+        }
+      })
+      
+      // Добавляем существующие метки
+      if (fromCoords.value) {
+        addPlacemark(fromCoords.value, 'from')
+      }
+      if (toCoords.value) {
+        addPlacemark(toCoords.value, 'to')
+      }
+      
+      // Центрируем карту по существующим точкам
+      if (fromCoords.value || toCoords.value) {
+        const bounds = []
+        if (fromCoords.value) bounds.push(fromCoords.value)
+        if (toCoords.value) bounds.push(toCoords.value)
+        if (bounds.length > 0) {
+          mapInstance.value.setBounds(bounds, { checkZoomRange: true, duration: 300 })
+        }
+      }
+    })
+  } catch (e) {
+    console.error('Error initializing map:', e)
+  }
+}
+
+// Выбрать точку на карте
+const selectPoint = async (coords, type = null) => {
+  const mode = type || mapMode.value
+  
+  // Проверяем координаты - должен быть массивом [lon, lat]
+  if (!coords || !Array.isArray(coords) || coords.length < 2) {
+    console.warn('Invalid coords format:', coords)
+    return
+  }
+  
+  const lon = parseFloat(coords[0])
+  const lat = parseFloat(coords[1])
+  
+  if (isNaN(lon) || isNaN(lat) || lon === 0 || lat === 0) {
+    console.warn('Invalid numeric coords:', lon, lat)
+    return
+  }
+  
+  const validCoords = [lon, lat]
+  
+  // Обновляем данные без геокодирования (оставляем координаты)
+  if (mode === 'from') {
+    fromCoords.value = validCoords
+    form.value.from = `Точка на карте (${lat.toFixed(4)}, ${lon.toFixed(4)})`
+    addPlacemark(validCoords, 'from')
+  } else {
+    toCoords.value = validCoords
+    form.value.to = `Точка на карте (${lat.toFixed(4)}, ${lon.toFixed(4)})`
+    addPlacemark(validCoords, 'to')
+  }
+  
+  // Пересчитываем маршрут если обе точки есть
+  if (fromCoords.value && toCoords.value) {
+    // Небольшая задержка чтобы метки успели добавиться
+    setTimeout(() => {
+      calculateRouteFromCoords()
+    }, 100)
+  }
+}
+
+// Добавить метку на карту
+const addPlacemark = (coords, type) => {
+  if (!mapInstance.value || !ymaps || !coords || !Array.isArray(coords) || coords.length < 2) {
+    console.warn('Cannot add placemark: invalid coords or map not ready', coords)
+    return
+  }
+  
+  // Удаляем старую метку этого типа
+  if (type === 'from' && fromPlacemark.value) {
+    mapInstance.value.geoObjects.remove(fromPlacemark.value)
+    fromPlacemark.value = null
+  }
+  if (type === 'to' && toPlacemark.value) {
+    mapInstance.value.geoObjects.remove(toPlacemark.value)
+    toPlacemark.value = null
+  }
+  
+  const placemark = new ymaps.Placemark(coords, {
+    balloonContent: type === 'from' ? 'Откуда' : 'Куда'
+  }, {
+    preset: type === 'from' ? 'islands#greenDotIcon' : 'islands#orangeDotIcon',
+    draggable: true
+  })
+  
+  placemark.events.add('dragend', async () => {
+    const newCoords = placemark.geometry.getCoordinates()
+    await selectPoint(newCoords, type)
+  })
+  
+  if (type === 'from') {
+    fromPlacemark.value = placemark
+  } else {
+    toPlacemark.value = placemark
+  }
+  
+  mapInstance.value.geoObjects.add(placemark)
+}
+
+// Рассчитать маршрут по координатам
+const calculateRouteFromCoords = async () => {
+  if (!fromCoords.value || !toCoords.value || !mapInstance.value || !ymaps) return
+  
+  // Проверяем что координаты валидны
+  if (!Array.isArray(fromCoords.value) || fromCoords.value.length < 2 ||
+      !Array.isArray(toCoords.value) || toCoords.value.length < 2) {
+    console.warn('Invalid coords for route:', fromCoords.value, toCoords.value)
+    return
+  }
+  
+  try {
+    // Удаляем старый маршрут
+    const toRemove = []
+    mapInstance.value.geoObjects.each((obj) => {
+      if (obj instanceof ymaps.multiRouter.MultiRoute) {
+        toRemove.push(obj)
+      }
+    })
+    toRemove.forEach(obj => {
+      try {
+        mapInstance.value.geoObjects.remove(obj)
+      } catch (e) {}
+    })
+    
+    // Создаём маршрут
+    const route = new ymaps.multiRouter.MultiRoute({
+      referencePoints: [
+        fromCoords.value.slice(),
+        toCoords.value.slice()
+      ],
+      params: {
+        routingMode: 'auto'
+      }
+    }, {
+      preset: 'islands#multiRouterBig'
+    })
+    
+    mapInstance.value.geoObjects.add(route)
+    
+    // После построения маршрута получаем расстояние
+    route.model.events.add('success', () => {
+      try {
+        const activeRoute = route.getActiveRoute()
+        if (activeRoute) {
+          const distanceMeters = activeRoute.getDistance()
+          form.value.distance = Math.round(distanceMeters / 1000)
+          
+          const duration = activeRoute.getDuration()
+          form.value.duration = Math.round(duration / 60) || Math.round(form.value.distance * 2.5)
+          
+          calculatePrice()
+        }
+      } catch (e) {
+        console.warn('Error getting route details:', e)
+      }
+    })
+  } catch (e) {
+    console.error('Route calculation error:', e)
+  }
+}
+
+// Закрыть карту
+const closeMapSelector = () => {
+  showMap.value = false
+  // Карта будет уничтожена при следующем открытии
+}
+
+// Вычисление расстояния между адресами
+const calculateRouteDistance = async () => {
+  if (!form.value.from || !form.value.to || !ymaps) {
+    return
+  }
+  
+  // Если адреса слишком короткие, пропускаем
+  if (form.value.from.length < 5 || form.value.to.length < 5) {
+    return
+  }
+  
+  try {
+    const route = await ymaps.route([form.value.from, form.value.to])
+    const distanceMeters = route.getLength()
+    form.value.distance = Math.round(distanceMeters / 1000)
+    form.value.duration = Math.round(route.getHumanLength().duration / 60) || Math.round(form.value.distance * 2.5)
+    calculatePrice()
+  } catch (e) {
+    // Маршрут не найден - используем значение по умолчанию
+    console.log('Route not found, using default distance')
+    updateDistance()
+  }
+}
 
 const isFormValid = computed(() => {
   return form.value.from.trim() !== '' &&
@@ -262,7 +729,6 @@ const submitForm = async () => {
     passenger_phone: props.passenger?.user?.phone,
   }, {
     onSuccess: () => {
-      console.log('=== ORDER CREATED SUCCESS ===')
       isSubmitting.value = false
       form.value = {
         from: '',
@@ -274,7 +740,6 @@ const submitForm = async () => {
       }
       calculatedPrice.value = null
       startPolling()
-      console.log('Polling started!')
     },
     onError: (errors) => {
       alert('Ошибка: ' + Object.values(errors).join(', '))
@@ -283,7 +748,7 @@ const submitForm = async () => {
   })
 }
 
-// ✅ Получение CSRF-токена (сначала из cookie, потом из meta)
+//  Получение CSRF-токена (сначала из cookie, потом из meta)
 const getCsrfToken = () => {
   // Сначала пробуем получить из cookie (более надёжно)
   const cookieToken = document.cookie
@@ -299,7 +764,7 @@ const getCsrfToken = () => {
   return document.querySelector('meta[name="csrf-token"]')?.content || ''
 }
 
-// ✅ Отправка отзыва с правильным заголовком
+//  Отправка отзыва с правильным заголовком
 const submitReview = async () => {
   if (!lastCompletedOrderId.value) {
     alert('ID заказа не найден')
@@ -307,9 +772,6 @@ const submitReview = async () => {
   }
   
   isSubmittingReview.value = true
-  
-  console.log('Отправляем отзыв для заказа:', lastCompletedOrderId.value)
-  console.log('CSRF Token:', getCsrfToken())
   
   try {
     const response = await fetch('/api/passenger/orders/' + lastCompletedOrderId.value + '/review', {
@@ -329,7 +791,6 @@ const submitReview = async () => {
     })
     
     const data = await response.json()
-    console.log('Ответ отзыва:', { status: response.status, data })
     
     if (response.status === 419) {
       alert('Сессия истекла. Перезагрузите страницу.')
@@ -353,10 +814,8 @@ const submitReview = async () => {
   }
 }
 
-// ✅ Исправленная функция воспроизведения звука
+//  Исправленная функция воспроизведения звука
 const playArrivedSound = () => {
-  console.log('Playing arrived sound...')
-  
   // Если AudioContext не создан — создаём
   if (!audioContext) {
     const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -439,16 +898,9 @@ const fetchOrderStatus = async () => {
     
     const data = await response.json()
 
-    console.log('=== ORDER STATUS CHECK ===')
-    console.log('has_active_order:', data.has_active_order)
-    console.log('order:', data.order)
-    console.log('previousStatus:', previousStatus.value)
-    console.log('=========================')
-
     if (data.has_active_order) {
-      // ✅ Проверяем изменение статуса на "arrived"
+      //  Проверяем изменение статуса на "arrived"
       if (previousStatus.value && previousStatus.value !== 'arrived' && data.order.status === 'arrived') {
-        console.log('Driver arrived! Playing sound...')
         playArrivedSound()
         showArrivedNotification.value = true
         setTimeout(() => {
@@ -590,7 +1042,7 @@ const toggleTag = (tag) => {
   }
 }
 
-// ✅ Закрытие модального окна отзыва
+// Закрытие модального окна отзыва
 const closeReviewModal = () => {
   showReviewModal.value = false
   reviewRating.value = 5
@@ -598,16 +1050,13 @@ const closeReviewModal = () => {
   reviewTags.value = []
 }
 
-// ✅ Инициализация при монтировании
+// Инициализация при монтировании
 onMounted(() => {
-  console.log('=== PASSENGER HOME MOUNTED ===')
-  
-  // ✅ Создаём AudioContext при первом взаимодействии пользователя
+  // Создаём AudioContext при первом взаимодействии пользователя
   const initAudio = () => {
     const AudioContext = window.AudioContext || window.webkitAudioContext
     if (AudioContext && !audioContext) {
       audioContext = new AudioContext()
-      console.log('AudioContext initialized')
     }
     // Убираем обработчики после первого клика
     document.removeEventListener('click', initAudio)
@@ -619,13 +1068,15 @@ onMounted(() => {
   
   fetchOrderStatus()
   startPolling()
-  loadOrderHistory() // Загружаем историю заказов
-  console.log('Polling interval:', pollingInterval)
+  loadOrderHistory()
+  
+  // Инициализация поиска адресов
+  initAddressSearch()
 })
 
 onUnmounted(() => {
   stopPolling()
-  // ✅ Очищаем AudioContext при размонтировании
+  //  Очищаем AudioContext при размонтировании
   if (audioContext && audioContext.state !== 'closed') {
     audioContext.close().catch(() => {})
   }
@@ -864,11 +1315,24 @@ onUnmounted(() => {
                 <div class="h-3 w-3 rounded-full bg-green-500"></div>
               </div>
               <input
+                id="from-input"
                 v-model="form.from"
                 type="text"
                 placeholder="Откуда"
-                class="w-full rounded-lg border-0 bg-gray-800 py-3 pl-12 pr-4 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+                @input="calculateRouteDistance"
+                class="w-full rounded-lg border-0 bg-gray-800 py-3 pl-12 pr-12 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
               />
+              <button
+                type="button"
+                @click="openMapSelector('from')"
+                class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-gray-700 p-2 text-gray-400 hover:bg-gray-600 hover:text-white"
+                title="Выбрать на карте"
+              >
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -878,11 +1342,24 @@ onUnmounted(() => {
                 <div class="h-3 w-3 rounded-full bg-orange-500"></div>
               </div>
               <input
+                id="to-input"
                 v-model="form.to"
                 type="text"
                 placeholder="Куда"
-                class="w-full rounded-lg border-0 bg-gray-800 py-3 pl-12 pr-4 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
+                @input="calculateRouteDistance"
+                class="w-full rounded-lg border-0 bg-gray-800 py-3 pl-12 pr-12 text-white placeholder-gray-500 focus:ring-2 focus:ring-yellow-500"
               />
+              <button
+                type="button"
+                @click="openMapSelector('to')"
+                class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-gray-700 p-2 text-gray-400 hover:bg-gray-600 hover:text-white"
+                title="Выбрать на карте"
+              >
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -921,7 +1398,7 @@ onUnmounted(() => {
                     form.tariff_id == tariff.id ? 'bg-yellow-500' : 'bg-gray-700'
                   ]">
                     <svg class="h-5 w-5" :class="form.tariff_id == tariff.id ? 'text-gray-900' : 'text-gray-400'" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
+                      <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5 1.5zM5 11 l1.5 -4.5 h11 L19 11 H5z"/>
                     </svg>
                   </div>
                   <div>
@@ -1039,6 +1516,43 @@ onUnmounted(() => {
               Вперёд →
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно с картой -->
+    <div v-if="showMap" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+      <div class="w-full max-w-2xl rounded-2xl bg-gray-800 p-4 shadow-2xl">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-lg font-bold text-white">
+            Выберите {{ mapMode === 'from' ? 'место отправления' : 'пункт назначения' }}
+          </h2>
+          <button
+            @click="closeMapSelector"
+            class="rounded-lg bg-gray-700 p-2 text-gray-400 hover:bg-gray-600 hover:text-white"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <!-- Инструкция -->
+        <div class="mb-3 rounded-lg bg-yellow-500/20 p-3 text-sm text-yellow-400">
+          💡 Нажмите на карту чтобы выбрать {{ mapMode === 'from' ? 'откуда' : 'куда' }} ехать
+        </div>
+        
+        <!-- Контейнер карты -->
+        <div id="map-container" class="mb-4 h-96 w-full rounded-lg bg-gray-700"></div>
+        
+        <!-- Кнопки -->
+        <div class="flex gap-3">
+          <button
+            @click="closeMapSelector"
+            class="flex-1 rounded-lg bg-gray-700 py-3 font-semibold text-white transition-colors hover:bg-gray-600"
+          >
+            Готово
+          </button>
         </div>
       </div>
     </div>

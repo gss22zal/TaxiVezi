@@ -16,6 +16,7 @@ use App\Http\Controllers\Admin\AdminTransactionsController;
 use App\Http\Controllers\Admin\AdminPayoutsController;
 use App\Http\Controllers\Driver\CarController;
 use App\Http\Controllers\Dispatcher\DispatcherReviewsController;
+use App\Http\Controllers\Dispatcher\DispatcherMapController;
 use App\Http\Controllers\Api\OrderStatsController;
 use App\Http\Controllers\Api\AvailableOrdersController;
 use \App\Http\Controllers\Api\AcceptOrderController;
@@ -80,6 +81,9 @@ Route::get('/api/dispatcher/orders/cancelled', DispatcherCancelledOrdersControll
 // API endpoint для статусов водителей
 Route::get('/api/driver-statuses', DriverStatusesController::class)->middleware(['auth', 'api.rate_limit']);
 
+// API для карты диспетчера
+Route::get('/api/dispatcher/map-data', [\App\Http\Controllers\Dispatcher\DispatcherMapController::class, 'mapData'])->middleware(['auth', 'api.rate_limit']);
+
 // API для пассажира - активный заказ
 Route::get('/api/passenger/active-order', [PassengerOrderController::class, 'activeOrder'])->middleware('auth');
 
@@ -141,9 +145,7 @@ Route::middleware(['auth', 'role:dispatcher'])->group(function () {
 
     Route::get('/dispatcher/analytics', [AnalyticsController::class, 'dispatcher'])->name('dispatcher.analytics');
 
-    Route::get('/dispatcher/map', function () {
-        return Inertia::render('Dispatcher/Map');
-    })->name('dispatcher.map');
+    Route::get('/dispatcher/map', [DispatcherMapController::class, 'index'])->name('dispatcher.map');
 
     Route::get('/dispatcher/reviews', [DispatcherReviewsController::class, 'index'])->name('dispatcher.reviews');
 
