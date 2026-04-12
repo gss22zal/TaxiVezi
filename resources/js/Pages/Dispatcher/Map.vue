@@ -399,63 +399,56 @@ const addRouteMarkers = (pickupCoords, dropoffCoords) => {
     return
   }
   
-  // Если координаты одинаковые - ставим один круг
-  if (validPickup && validDropoff && 
-      Math.abs(pickupCoords[0] - dropoffCoords[0]) < 0.0001 && 
-      Math.abs(pickupCoords[1] - dropoffCoords[1]) < 0.0001) {
-    console.log('Coordinates are the same, placing single circle')
-    try {
-      const circle = new window.ymaps.Circle(
-        [pickupCoords, 10],  // [центр, радиус]
-        {
-          fillColor: '#3b82f680',
-          strokeColor: '#3b82f6',
-          strokeWidth: 2
-        }
-      )
-      circle.properties.set('balloonContent', `<strong>Заказ</strong><br>Подача: ${orderRouteData.value?.pickup_address || ''}<br>Назначение: ${orderRouteData.value?.dropoff_address || ''}`)
-      mapInstance.value.geoObjects.add(circle)
-    } catch(e) {
-      console.error('Error adding single circle:', e)
-    }
-    return
+  // Создаём SVG иконки как строки
+  const createIcon = (color) => {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+      <circle cx="16" cy="16" r="12" fill="${color}" stroke="white" stroke-width="2"/>
+    </svg>`
   }
   
-  // Метка подачи (зелёный круг)
+  // Метка подачи (зелёная)
   if (validPickup) {
     try {
-      const pickupCircle = new window.ymaps.Circle(
-        [pickupCoords, 10],  // [центр, радиус]
-        {
-          fillColor: '#22c55e80',
-          strokeColor: '#22c55e',
-          strokeWidth: 2
-        }
-      )
-      pickupCircle.properties.set('balloonContent', `<strong>Подача</strong><br>${orderRouteData.value?.pickup_address || ''}`)
-      mapInstance.value.geoObjects.add(pickupCircle)
-      console.log('✓ Added pickup circle at:', pickupCoords)
+      const greenIcon = createIcon('#22c55e')
+      const pickupPlacemark = new window.ymaps.Placemark(pickupCoords, {
+        balloonContent: `<strong>Подача</strong><br>${orderRouteData.value?.pickup_address || ''}`
+      }, {
+        iconLayout: 'default#imageWithContent',
+        iconShape: {
+          type: 'Circle',
+          coords: [16, 16, 12]
+        },
+        iconImageHref: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(greenIcon),
+        iconImageSize: [32, 32],
+        iconImageOffset: [-16, -16]
+      })
+      mapInstance.value.geoObjects.add(pickupPlacemark)
+      console.log('✓ Added pickup marker at:', pickupCoords)
     } catch(e) {
-      console.error('Error adding pickup circle:', e)
+      console.error('Error adding pickup marker:', e)
     }
   }
   
-  // Метка назначения (красный круг)
+  // Метка назначения (красная)
   if (validDropoff) {
     try {
-      const dropoffCircle = new window.ymaps.Circle(
-        [dropoffCoords, 10],  // [центр, радиус]
-        {
-          fillColor: '#ef444480',
-          strokeColor: '#ef4444',
-          strokeWidth: 2
-        }
-      )
-      dropoffCircle.properties.set('balloonContent', `<strong>Назначение</strong><br>${orderRouteData.value?.dropoff_address || ''}`)
-      mapInstance.value.geoObjects.add(dropoffCircle)
-      console.log('✓ Added dropoff circle at:', dropoffCoords)
+      const redIcon = createIcon('#ef4444')
+      const dropoffPlacemark = new window.ymaps.Placemark(dropoffCoords, {
+        balloonContent: `<strong>Назначение</strong><br>${orderRouteData.value?.dropoff_address || ''}`
+      }, {
+        iconLayout: 'default#imageWithContent',
+        iconShape: {
+          type: 'Circle',
+          coords: [16, 16, 12]
+        },
+        iconImageHref: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(redIcon),
+        iconImageSize: [32, 32],
+        iconImageOffset: [-16, -16]
+      })
+      mapInstance.value.geoObjects.add(dropoffPlacemark)
+      console.log('✓ Added dropoff marker at:', dropoffCoords)
     } catch(e) {
-      console.error('Error adding dropoff circle:', e)
+      console.error('Error adding dropoff marker:', e)
     }
   }
 }
