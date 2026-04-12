@@ -34,7 +34,9 @@ class PassengerController extends Controller
         $mapsSettings = [
             'yandex_maps_api_key' => Setting::get('maps.yandex_maps_api_key', ''),
             'google_maps_api_key' => Setting::get('maps.google_maps_api_key', ''),
-            'default_map_center' => Setting::get('maps.default_map_center', '53.990061,84.746699'),
+            // Преобразуем строку "lat,lon" в массив [lat, lon]
+            'map_center' => $this->parseMapCenter(Setting::get('maps.default_map_center', '55.0415,82.9346')),
+            'map_zoom' => (int) Setting::get('maps.default_map_zoom', 12),
         ];
 
         return Inertia::render('Passenger/Home', [
@@ -51,5 +53,30 @@ class PassengerController extends Controller
             'tariffs' => $tariffs,
             'mapsSettings' => $mapsSettings,
         ]);
+    }
+
+    /**
+     * Преобразование строки координат в массив [lat, lon]
+     * @param string $coordsString Формат "lat,lon"
+     * @return array Массив [lat, lon]
+     */
+    private function parseMapCenter(string $coordsString): array
+    {
+        $parts = explode(',', $coordsString);
+        
+        if (count($parts) >= 2) {
+            $lat = (float) trim($parts[0]);
+            $lon = (float) trim($parts[1]);
+            
+            // Проверка на валидные координаты
+            if (!is_nan($lat) && !is_nan($lon) && 
+                $lat >= -90 && $lat <= 90 && 
+                $lon >= -180 && $lon <= 180) {
+                return [$lat, $lon];
+            }
+        }
+        
+        // Возвращаем дефолтные координаты (Новосибирск)
+        return [55.0415, 82.9346];
     }
 }

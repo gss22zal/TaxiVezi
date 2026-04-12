@@ -16,8 +16,9 @@ class DispatcherMapController extends Controller
         $mapSettings = [
             'yandex_maps_api_key' => Setting::get('maps.yandex_maps_api_key', ''),
             'google_maps_api_key' => Setting::get('maps.google_maps_api_key', ''),
-            'default_map_center' => Setting::get('maps.default_map_center', '53.990061,84.746699'),
-            'default_map_zoom' => Setting::get('maps.default_map_zoom', 15),
+            // Преобразуем строку "lat,lon" в массив [lat, lon]
+            'map_center' => $this->parseMapCenter(Setting::get('maps.default_map_center', '55.0415,82.9346')),
+            'map_zoom' => (int) Setting::get('maps.default_map_zoom', 12),
         ];
 
         // Получаем активных водителей с координатами
@@ -58,10 +59,30 @@ class DispatcherMapController extends Controller
                 ];
             });
 
+        // Получаем данные заказа для построения маршрута (если передан order_id)
+        $orderRoute = null;
+        $orderId = request('order');
+        if ($orderId) {
+            $order = Order::find($orderId);
+            if ($order) {
+                $orderRoute = [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'pickup_address' => $order->pickup_address,
+                    'dropoff_address' => $order->dropoff_address,
+                    'pickup_lat' => $order->pickup_lat,
+                    'pickup_lng' => $order->pickup_lng,
+                    'dropoff_lat' => $order->dropoff_lat,
+                    'dropoff_lng' => $order->dropoff_lng,
+                ];
+            }
+        }
+
         return Inertia::render('Dispatcher/Map', [
             'mapSettings' => $mapSettings,
             'mapDrivers' => $drivers,
             'mapOrders' => $orders,
+            'orderRoute' => $orderRoute,
         ]);
     }
 
@@ -112,5 +133,30 @@ class DispatcherMapController extends Controller
             'drivers' => $drivers,
             'orders' => $orders,
         ]);
+    }
+
+    /**
+     * Преобразование строки координат в массив [lat, lon]
+     * @param string $coordsString Формат "lat,lon"
+     * @return array Массив [lat, lon]
+     */
+    private function parseMapCenter(string $coordsString): array
+    {
+        $parts = explode(',', $coordsString);
+        
+        if (count($parts) >= 2) {
+            $lat = (float) trim($parts[0]);
+            $lon = (float) trim($parts[1]);
+            
+            // Проверка на валидные координаты
+            if (!is_nan($lat) && !is_nan($lon) && 
+                $lat >= -90 && $lat <= 90 && 
+                $lon >= -180 && $lon <= 180) {
+                return [$lat, $lon];
+            }
+        }
+        
+        // Возвращаем дефолтные координаты (Новосибирск)
+        return [55.0415, 82.9346];
     }
 }

@@ -21,6 +21,23 @@ const props = defineProps({
 // Настройки карт из props
 const mapsSettings = computed(() => props.mapsSettings || {})
 
+// Центр карты из настроек (массив [lat, lon] или строка "lat,lon")
+const mapCenter = computed(() => {
+  // Новый формат: массив [lat, lon]
+  if (mapsSettings.value?.map_center && Array.isArray(mapsSettings.value.map_center) && mapsSettings.value.map_center.length >= 2) {
+    return mapsSettings.value.map_center
+  }
+  // Старый формат: строка "lat,lon" (для обратной совместимости)
+  const center = mapsSettings.value?.default_map_center || '55.0415,82.9346'
+  const [lat, lng] = center.split(',').map(Number)
+  return [lat || 55.0415, lng || 82.9346]
+})
+
+// Масштаб карты из настроек
+const mapZoom = computed(() => {
+  return mapsSettings.value?.map_zoom || 12
+})
+
 const form = ref({
   from: '',
   to: '',
@@ -32,17 +49,10 @@ const form = ref({
 
 // Состояние карты
 const showMap = ref(false)
-const mapMode = ref('from') // 'from' или 'to'
-const fromCoords = ref(null)
+const selectingPoint = ref('from') // 'from' или 'to' - какую точку выбираем сейчас
+const fromCoords = ref(null) // [lat, lon] от Яндекса
 const toCoords = ref(null)
-const mapCenter = ref([53.990061, 84.746699]) // Новосибирск
 const mapInstance = ref(null)
-const fromPlacemark = ref(null)
-const toPlacemark = ref(null)
-
-// Состояние поиска адресов
-const fromInputRef = ref(null)
-const toInputRef = ref(null)
 let ymaps = null
 
 const isSubmitting = ref(false)
@@ -409,13 +419,12 @@ const setupCustomAddressSearch = (inputId, onSelect) => {
   })
 }
 
-// Открыть карту для выбора точки
-const openMapSelector = (mode) => {
-  mapMode.value = mode
+// Открыть карту для выбора маршрута
+const openMapSelector = () => {
+  selectingPoint.value = 'from' // Начинаем с точки А
   showMap.value = true
   
   nextTick(() => {
-    // Небольшая задержка чтобы DOM успел отрисоваться
     setTimeout(() => {
       initMap()
     }, 100)
@@ -427,224 +436,231 @@ const initMap = async () => {
   const mapContainer = document.getElementById('map-container')
   if (!mapContainer) return
   
-  // Если карта уже инициализирована - просто обновляем состояние
-  if (mapInstance.value && mapInstance.value.geometry) {
-    // Очищаем старые метки и маршруты
-    try {
-      mapInstance.value.geoObjects.removeAll()
-    } catch (e) {
-      console.warn('Error clearing geoObjects:', e)
-    }
-    fromPlacemark.value = null
-    toPlacemark.value = null
-    
-    // Добавляем существующие метки
-    if (fromCoords.value) {
-      addPlacemark(fromCoords.value, 'from')
-    }
-    if (toCoords.value) {
-      addPlacemark(toCoords.value, 'to')
-    }
-    
-    // Центрируем карту
-    if (fromCoords.value || toCoords.value) {
-      const bounds = []
-      if (fromCoords.value) bounds.push(fromCoords.value)
-      if (toCoords.value) bounds.push(toCoords.value)
-      if (bounds.length > 0) {
-        mapInstance.value.setBounds(bounds, { checkZoomRange: true, duration: 300 })
-      }
-    }
-    
-    return
-  }
+  if (mapInstance.value) return
   
   try {
     await loadYandexMaps()
     
     ymaps.ready(() => {
-      // Создаём карту
       mapInstance.value = new ymaps.Map('map-container', {
         center: mapCenter.value,
-        zoom: 12,
+        zoom: mapZoom.value,
         controls: ['zoomControl', 'geolocationControl']
       })
       
-      // Обработчик клика по карте
+      // Клик по карте
       mapInstance.value.events.add('click', async (e) => {
-        const coords = e.get('coords')
-        if (coords && Array.isArray(coords) && coords.length >= 2) {
-          await selectPoint(coords)
+        if (selectingPoint.value) {
+          const coords = e.get('coords')
+          await setPoint(selectingPoint.value, coords)
         }
       })
-      
-      // Добавляем существующие метки
-      if (fromCoords.value) {
-        addPlacemark(fromCoords.value, 'from')
-      }
-      if (toCoords.value) {
-        addPlacemark(toCoords.value, 'to')
-      }
-      
-      // Центрируем карту по существующим точкам
-      if (fromCoords.value || toCoords.value) {
-        const bounds = []
-        if (fromCoords.value) bounds.push(fromCoords.value)
-        if (toCoords.value) bounds.push(toCoords.value)
-        if (bounds.length > 0) {
-          mapInstance.value.setBounds(bounds, { checkZoomRange: true, duration: 300 })
-        }
-      }
     })
   } catch (e) {
-    console.error('Error initializing map:', e)
+    console.error('Map init error:', e)
   }
 }
 
-// Выбрать точку на карте
-const selectPoint = async (coords, type = null) => {
-  const mode = type || mapMode.value
+// Установить точку
+const setPoint = async (type, coords) => {
+  if (!mapInstance.value || !ymaps) return
   
-  // Проверяем координаты - должен быть массивом [lon, lat]
-  if (!coords || !Array.isArray(coords) || coords.length < 2) {
-    console.warn('Invalid coords format:', coords)
+  if (!Array.isArray(coords) || coords.length < 2) {
+    console.warn('Invalid coords:', coords)
     return
   }
   
-  const lon = parseFloat(coords[0])
-  const lat = parseFloat(coords[1])
-  
-  if (isNaN(lon) || isNaN(lat) || lon === 0 || lat === 0) {
-    console.warn('Invalid numeric coords:', lon, lat)
-    return
-  }
-  
-  const validCoords = [lon, lat]
-  
-  // Обновляем данные без геокодирования (оставляем координаты)
-  if (mode === 'from') {
-    fromCoords.value = validCoords
-    form.value.from = `Точка на карте (${lat.toFixed(4)}, ${lon.toFixed(4)})`
-    addPlacemark(validCoords, 'from')
-  } else {
-    toCoords.value = validCoords
-    form.value.to = `Точка на карте (${lat.toFixed(4)}, ${lon.toFixed(4)})`
-    addPlacemark(validCoords, 'to')
-  }
-  
-  // Пересчитываем маршрут если обе точки есть
-  if (fromCoords.value && toCoords.value) {
-    // Небольшая задержка чтобы метки успели добавиться
-    setTimeout(() => {
-      calculateRouteFromCoords()
-    }, 100)
-  }
-}
-
-// Добавить метку на карту
-const addPlacemark = (coords, type) => {
-  if (!mapInstance.value || !ymaps || !coords || !Array.isArray(coords) || coords.length < 2) {
-    console.warn('Cannot add placemark: invalid coords or map not ready', coords)
-    return
-  }
-  
-  // Удаляем старую метку этого типа
-  if (type === 'from' && fromPlacemark.value) {
-    mapInstance.value.geoObjects.remove(fromPlacemark.value)
-    fromPlacemark.value = null
-  }
-  if (type === 'to' && toPlacemark.value) {
-    mapInstance.value.geoObjects.remove(toPlacemark.value)
-    toPlacemark.value = null
-  }
-  
-  const placemark = new ymaps.Placemark(coords, {
-    balloonContent: type === 'from' ? 'Откуда' : 'Куда'
-  }, {
-    preset: type === 'from' ? 'islands#greenDotIcon' : 'islands#orangeDotIcon',
-    draggable: true
-  })
-  
-  placemark.events.add('dragend', async () => {
-    const newCoords = placemark.geometry.getCoordinates()
-    await selectPoint(newCoords, type)
-  })
+  console.log(`Setting point ${type}:`, coords)
   
   if (type === 'from') {
-    fromPlacemark.value = placemark
+    fromCoords.value = coords
   } else {
-    toPlacemark.value = placemark
+    toCoords.value = coords
   }
   
-  mapInstance.value.geoObjects.add(placemark)
+  // Переключаемся на следующую точку
+  if (type === 'from') {
+    selectingPoint.value = 'to'
+  } else {
+    selectingPoint.value = 'from' // После точки Б можно выбрать точку А снова
+  }
 }
 
-// Рассчитать маршрут по координатам
-const calculateRouteFromCoords = async () => {
-  if (!fromCoords.value || !toCoords.value || !mapInstance.value || !ymaps) return
-  
-  // Проверяем что координаты валидны
-  if (!Array.isArray(fromCoords.value) || fromCoords.value.length < 2 ||
-      !Array.isArray(toCoords.value) || toCoords.value.length < 2) {
-    console.warn('Invalid coords for route:', fromCoords.value, toCoords.value)
+// Построить маршрут
+const buildRoute = async () => {
+  if (!fromCoords.value || !toCoords.value || !ymaps || !mapInstance.value) {
+    console.warn('Cannot build route: missing data')
+    alert('Выберите обе точки на карте')
     return
   }
   
+  console.log('Building route...', fromCoords.value, toCoords.value)
+  
   try {
-    // Удаляем старый маршрут
-    const toRemove = []
-    mapInstance.value.geoObjects.each((obj) => {
-      if (obj instanceof ymaps.multiRouter.MultiRoute) {
-        toRemove.push(obj)
-      }
-    })
-    toRemove.forEach(obj => {
-      try {
-        mapInstance.value.geoObjects.remove(obj)
-      } catch (e) {}
-    })
+    // Получаем адреса для координат
+    const fromAddress = await getAddressFromCoords(fromCoords.value)
+    const toAddress = await getAddressFromCoords(toCoords.value)
     
-    // Создаём маршрут
-    const route = new ymaps.multiRouter.MultiRoute({
-      referencePoints: [
-        fromCoords.value.slice(),
-        toCoords.value.slice()
-      ],
-      params: {
-        routingMode: 'auto'
-      }
-    }, {
-      preset: 'islands#multiRouterBig'
-    })
+    if (!fromAddress || !toAddress) {
+      alert('Не удалось определить адреса точек')
+      return
+    }
     
-    mapInstance.value.geoObjects.add(route)
+    console.log('Route addresses:', fromAddress, toAddress)
     
-    // После построения маршрута получаем расстояние
-    route.model.events.add('success', () => {
-      try {
-        const activeRoute = route.getActiveRoute()
-        if (activeRoute) {
-          const distanceMeters = activeRoute.getDistance()
-          form.value.distance = Math.round(distanceMeters / 1000)
-          
-          const duration = activeRoute.getDuration()
-          form.value.duration = Math.round(duration / 60) || Math.round(form.value.distance * 2.5)
-          
-          calculatePrice()
-        }
-      } catch (e) {
-        console.warn('Error getting route details:', e)
+    // Создаём маршрут через адреса
+    const route = await ymaps.route([fromAddress, toAddress])
+    
+    // Получаем расстояние и время из свойств маршрута
+    const distance = route.getLength()
+    const timeParts = route.getHumanTime() // Возвращает строку типа "15 мин"
+    
+    // Парсим время из строки (например, "15 мин" → 15)
+    let duration = 0
+    if (timeParts) {
+      const timeStr = typeof timeParts === 'string' ? timeParts : ''
+      const match = timeStr.match(/(\d+)/)
+      if (match) {
+        duration = parseInt(match[1], 10)
       }
-    })
+    }
+    
+    // Если не удалось получить время - рассчитываем примерно (2.5 мин на км)
+    if (!duration) {
+      duration = Math.round(distance / 1000 * 2.5)
+    }
+    
+    console.log('Route built:', distance, duration)
+    
+    form.value.distance = Math.round(distance / 1000)
+    form.value.duration = duration
+    calculatePrice()
+    
   } catch (e) {
-    console.error('Route calculation error:', e)
+    console.error('Route build error:', e)
+    alert('Не удалось построить маршрут. Попробуйте другие точки.')
+  }
+}
+
+// Сократить адрес (убрать область, район, тип населённого пункта)
+const shortenAddress = (address) => {
+  if (!address) return ''
+  
+  // Разбиваем адрес на части
+  const parts = address.split(',').map(p => p.trim())
+  
+  // Фильтруем части - убираем области, края, районы
+  const filtered = parts.filter(part => {
+    const lower = part.toLowerCase()
+    // Пропускаем если содержит эти слова
+    if (lower.includes('область')) return false
+    if (lower.includes('край')) return false
+    if (lower.includes('район')) return false
+    if (lower.includes('респ')) return false
+    if (lower.includes('автономный')) return false
+    if (lower.includes('округ')) return false
+    return true
+  })
+  
+  // Убираем префиксы типа "село", "город", "деревня" и т.д.
+  const cleaned = filtered.map(part => {
+    return part.replace(/^(село|город|деревня|поселок|пгт|станица)\.?\s*/gi, '').trim()
+  })
+  
+  // Сокращаем типы улиц
+  const streetTypes = [
+    ['улица', 'ул.'],
+    ['проспект', 'пр-кт'],
+    ['бульвар', 'б-р'],
+    ['переулок', 'пер.'],
+    ['тупик', 'туп.'],
+    ['шоссе', 'шос.'],
+    ['площадь', 'пл.'],
+    ['набережная', 'наб.'],
+    ['проезд', 'пр-д'],
+    ['микрорайон', 'м-н']
+  ]
+  
+  const finalParts = cleaned.map(part => {
+    for (const [full, short] of streetTypes) {
+      const regex = new RegExp(`^${full}`, 'gi')
+      if (regex.test(part)) {
+        return part.replace(regex, short)
+      }
+    }
+    return part
+  })
+  
+  return finalParts.join(', ')
+}
+
+// Получить адрес из координат (с проверкой точности)
+const getAddressFromCoords = async (coords) => {
+  try {
+    const result = await ymaps.geocode(coords)
+    const first = result.geoObjects.get(0)
+    
+    if (!first) {
+      return null
+    }
+    
+    // Получаем адрес и его детали
+    const metaData = first.metaDataProperty?.GeocoderMetaData
+    const addressDetails = metaData?.AddressDetails
+    
+    // Проверяем точность адреса
+    const kind = metaData?.kind // 'house', 'street', 'locality', и т.д.
+    
+    // Если найден только город/район/область - возвращаем null (будут координаты)
+    if (kind === 'locality' || kind === 'province' || kind === 'country') {
+      return null
+    }
+    
+    // Возвращаем полный адрес для последующего сокращения
+    return first.getAddressLine()
+  } catch (e) {
+    console.warn('Geocode error:', e)
+    return null
   }
 }
 
 // Закрыть карту
 const closeMapSelector = () => {
   showMap.value = false
-  // Карта будет уничтожена при следующем открытии
+  mapInstance.value = null
+}
+
+// Подтвердить выбор
+const confirmMapSelection = () => {
+  if (!fromCoords.value || !toCoords.value) {
+    alert('Выберите обе точки на карте')
+    return
+  }
+  
+  // Геокодируем для получения адресов
+  Promise.all([
+    getAddressFromCoords(fromCoords.value),
+    getAddressFromCoords(toCoords.value)
+  ]).then(([fromAddress, toAddress]) => {
+    console.log('Addresses from geocode:', fromAddress, toAddress)
+    
+    // Если адрес не определён или недостаточно точный - показываем координаты
+    const fromLat = fromCoords.value[1].toFixed(4)
+    const fromLon = fromCoords.value[0].toFixed(4)
+    const toLat = toCoords.value[1].toFixed(4)
+    const toLon = toCoords.value[0].toFixed(4)
+    
+    // Сокращаем адреса если они есть
+    const shortFromAddress = fromAddress ? shortenAddress(fromAddress) : null
+    const shortToAddress = toAddress ? shortenAddress(toAddress) : null
+    
+    console.log('Shortened addresses:', shortFromAddress, shortToAddress)
+    
+    form.value.from = shortFromAddress || `Координаты: ${fromLat}, ${fromLon}`
+    form.value.to = shortToAddress || `Координаты: ${toLat}, ${toLon}`
+    
+    closeMapSelector()
+  })
 }
 
 // Вычисление расстояния между адресами
@@ -1324,7 +1340,7 @@ onUnmounted(() => {
               />
               <button
                 type="button"
-                @click="openMapSelector('from')"
+                @click="openMapSelector"
                 class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-gray-700 p-2 text-gray-400 hover:bg-gray-600 hover:text-white"
                 title="Выбрать на карте"
               >
@@ -1351,7 +1367,7 @@ onUnmounted(() => {
               />
               <button
                 type="button"
-                @click="openMapSelector('to')"
+                @click="openMapSelector"
                 class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-gray-700 p-2 text-gray-400 hover:bg-gray-600 hover:text-white"
                 title="Выбрать на карте"
               >
@@ -1522,11 +1538,9 @@ onUnmounted(() => {
 
     <!-- Модальное окно с картой -->
     <div v-if="showMap" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div class="w-full max-w-2xl rounded-2xl bg-gray-800 p-4 shadow-2xl">
+      <div class="w-full max-w-3xl rounded-2xl bg-gray-800 p-4 shadow-2xl">
         <div class="mb-4 flex items-center justify-between">
-          <h2 class="text-lg font-bold text-white">
-            Выберите {{ mapMode === 'from' ? 'место отправления' : 'пункт назначения' }}
-          </h2>
+          <h2 class="text-lg font-bold text-white">Выберите маршрут на карте</h2>
           <button
             @click="closeMapSelector"
             class="rounded-lg bg-gray-700 p-2 text-gray-400 hover:bg-gray-600 hover:text-white"
@@ -1537,9 +1551,71 @@ onUnmounted(() => {
           </button>
         </div>
         
-        <!-- Инструкция -->
-        <div class="mb-3 rounded-lg bg-yellow-500/20 p-3 text-sm text-yellow-400">
-          💡 Нажмите на карту чтобы выбрать {{ mapMode === 'from' ? 'откуда' : 'куда' }} ехать
+        <!-- Панель выбора точек -->
+        <div class="mb-3 space-y-2">
+          <div class="flex items-center gap-2">
+            <span class="text-2xl font-bold text-blue-500">🅰️</span>
+            <input
+              type="text"
+              :value="fromCoords ? `${fromCoords[1].toFixed(4)}, ${fromCoords[0].toFixed(4)}` : ''"
+              placeholder="Точка А (клик на карте)"
+              readonly
+              class="flex-1 rounded-lg border-0 bg-gray-700 px-3 py-2 text-white placeholder-gray-500"
+            />
+            <button
+              @click="selectingPoint = 'from'"
+              :class="[
+                'px-4 py-2 rounded-lg font-semibold transition-all',
+                selectingPoint === 'from' ? 'bg-orange-500 text-white animate-pulse' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+              ]"
+            >
+              {{ selectingPoint === 'from' ? 'Кликните...' : 'Выбрать' }}
+            </button>
+          </div>
+          
+          <div class="flex items-center gap-2">
+            <span class="text-2xl font-bold text-red-500">🅱️</span>
+            <input
+              type="text"
+              :value="toCoords ? `${toCoords[1].toFixed(4)}, ${toCoords[0].toFixed(4)}` : ''"
+              placeholder="Точка Б (клик на карте)"
+              readonly
+              class="flex-1 rounded-lg border-0 bg-gray-700 px-3 py-2 text-white placeholder-gray-500"
+            />
+            <button
+              @click="selectingPoint = 'to'"
+              :class="[
+                'px-4 py-2 rounded-lg font-semibold transition-all',
+                selectingPoint === 'to' ? 'bg-orange-500 text-white animate-pulse' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+              ]"
+            >
+              {{ selectingPoint === 'to' ? 'Кликните...' : 'Выбрать' }}
+            </button>
+          </div>
+          
+          <!-- Кнопка построения маршрута -->
+          <button
+            @click="buildRoute"
+            :disabled="!fromCoords || !toCoords"
+            :class="[
+              'w-full py-3 rounded-lg font-semibold transition-all',
+              fromCoords && toCoords
+                ? 'bg-blue-500 text-white hover:bg-blue-600'
+                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+            ]"
+          >
+            {{ fromCoords && toCoords ? '🚗 Построить маршрут' : 'Выберите обе точки' }}
+          </button>
+        </div>
+        
+        <!-- Информация о маршруте -->
+        <div v-if="form.distance && form.duration" class="mb-3 rounded-lg bg-blue-500/20 p-3 flex items-center justify-between">
+          <div class="text-sm text-blue-400">
+            🚗 Маршрут построен
+          </div>
+          <div class="text-sm text-white font-semibold">
+            {{ form.distance }} км (~{{ form.duration }} мин)
+          </div>
         </div>
         
         <!-- Контейнер карты -->
@@ -1550,6 +1626,18 @@ onUnmounted(() => {
           <button
             @click="closeMapSelector"
             class="flex-1 rounded-lg bg-gray-700 py-3 font-semibold text-white transition-colors hover:bg-gray-600"
+          >
+            Отмена
+          </button>
+          <button
+            @click="confirmMapSelection"
+            :disabled="!fromCoords || !toCoords"
+            :class="[
+              'flex-1 rounded-lg py-3 font-semibold transition-colors',
+              fromCoords && toCoords
+                ? 'bg-green-500 text-white hover:bg-green-600'
+                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+            ]"
           >
             Готово
           </button>

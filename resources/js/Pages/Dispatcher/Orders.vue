@@ -232,6 +232,38 @@ const getDate = (date) => {
   return new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+// Открыть карту с маршрутом заказа
+const openOrderMap = (order) => {
+  if (!order.pickup_address || !order.dropoff_address) {
+    alert('Адреса не указаны')
+    return
+  }
+  
+  console.log('Order data for map:', {
+    id: order.id,
+    pickup_address: order.pickup_address,
+    dropoff_address: order.dropoff_address,
+    pickup_lat: order.pickup_lat,
+    pickup_lng: order.pickup_lng,
+    dropoff_lat: order.dropoff_lat,
+    dropoff_lng: order.dropoff_lng
+  })
+  
+  // Сохраняем данные заказа в sessionStorage для передачи на страницу карты
+  sessionStorage.setItem('orderRoute', JSON.stringify({
+    pickup_address: order.pickup_address,
+    dropoff_address: order.dropoff_address,
+    pickup_lat: order.pickup_lat || null,
+    pickup_lng: order.pickup_lng || null,
+    dropoff_lat: order.dropoff_lat || null,
+    dropoff_lng: order.dropoff_lng || null,
+    order_number: order.order_number
+  }))
+  
+  // Открываем карту в новом окне
+  window.open('/dispatcher/map?order=' + order.id, '_blank')
+}
+
 onMounted(() => {
   document.addEventListener('click', closeDropdown)
 })
@@ -400,6 +432,13 @@ onUnmounted(() => {
             </span>
             <span v-else class="text-gray-500">Без водителя</span>
             <span class="text-gray-500">{{ getDate(order.created_at) }} {{ getTime(order.created_at) }}</span>
+            <button
+              @click.stop="openOrderMap(order)"
+              class="rounded-lg bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+              title="Показать на карте"
+            >
+              🗺️ Карта
+            </button>
           </div>
         </div>
         

@@ -1,7 +1,11 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { router } from '@inertiajs/vue3'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { router, usePage } from '@inertiajs/vue3'
 import DispatcherLayout from '@/Layouts/DispatcherLayout.vue'
+
+// Получаем данные из sessionStorage (приоритет над props)
+const sessionOrderRoute = typeof window !== 'undefined' ? sessionStorage.getItem('orderRoute') : null
+const sessionOrderData = sessionOrderRoute ? JSON.parse(sessionOrderRoute) : null
 
 const props = defineProps({
   mapSettings: {
@@ -15,15 +19,21 @@ const props = defineProps({
   mapOrders: {
     type: Array,
     default: () => []
+  },
+  orderRoute: {
+    type: Object,
+    default: null
   }
 })
+
+// Объединяем props и sessionStorage (sessionStorage имеет приоритет)
+const orderRouteData = ref(sessionOrderData || props.orderRoute)
 
 // Состояние - реактивные переменные для данных
 const drivers = ref([...props.mapDrivers])
 const orders = ref([...props.mapOrders])
 
 // Обновляем данные когда props меняются
-import { watch } from 'vue'
 watch(() => props.mapDrivers, (newVal) => {
   drivers.value = [...newVal]
 }, { deep: true })
@@ -39,6 +49,7 @@ const orderPlacemarks = ref([])
 const isLoading = ref(true)
 const error = ref('')
 const mapContainerReady = ref(false)
+const showOrderRoute = ref(!!orderRouteData.value)
 
 // Фильтры
 const filters = ref({
@@ -50,13 +61,23 @@ const filters = ref({
 
 // Вычисляемые координаты центра
 const mapCenter = computed(() => {
-  const center = props.mapSettings?.default_map_center || '53.990061,84.746699'
+  // Новый формат: массив [lat, lng]
+  if (props.mapSettings?.map_center && Array.isArray(props.mapSettings.map_center) && props.mapSettings.map_center.length >= 2) {
+    return props.mapSettings.map_center
+  }
+  // Старый формат: строка "lat,lng" (для обратной совместимости)
+  const center = props.mapSettings?.default_map_center || '55.0415,82.9346'
   const [lat, lng] = center.split(',').map(Number)
-  return [lat || 53.990061, lng || 84.746699]
+  return [lat || 55.0415, lng || 82.9346]
 })
 
 const mapZoom = computed(() => {
-  return props.mapSettings?.default_map_zoom || 15
+  // Новый формат
+  if (typeof props.mapSettings?.map_zoom === 'number') {
+    return props.mapSettings.map_zoom
+  }
+  // Старый формат (для обратной совместимости)
+  return props.mapSettings?.default_map_zoom || 12
 })
 
 const hasYandexApiKey = computed(() => {
@@ -122,6 +143,15 @@ const initMap = async () => {
         updateOrderPlacemarks()
 
         isLoading.value = false
+        
+        // Если есть заказ для маршрута - строим маршрут ПОСЛЕ загрузки карты
+        if (orderRouteData.value) {
+          console.log('Order route data:', orderRouteData.value)
+          // Небольшая задержка чтобы карта успела полностью инициализироваться
+          setTimeout(() => {
+            buildOrderRouteFromSession()
+          }, 300)
+        }
       } catch (e) {
         console.error('Error creating map:', e)
         error.value = 'Ошибка инициализации карты: ' + e.message
@@ -249,11 +279,197 @@ const updateOrderPlacemarks = () => {
   })
 }
 
+// Построение маршрута из sessionStorage
+const buildOrderRouteFromSession = () => {
+  if (!mapInstance.value || !orderRouteData.value || !window.ymaps) return
+  
+  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng } = orderRouteData.value
+  
+  // Координаты Москвы по умолчанию (если в БД стоят дефолтные)
+  const MOSCOW_LAT = 55.7558
+  const MOSCOW_LNG = 37.6173
+  
+  // Преобразуем координаты в числа (могут быть строками)
+  const pLat = pickup_lat ? parseFloat(pickup_lat) : null
+  const pLng = pickup_lng ? parseFloat(pickup_lng) : null
+  const dLat = dropoff_lat ? parseFloat(dropoff_lat) : null
+  const dLng = dropoff_lng ? parseFloat(dropoff_lng) : null
+  
+  // Проверяем координаты - должны быть не null, не NaN и не Москва по умолчанию
+  const isValidCoord = (lat, lng) => {
+    if (lat === null || lng === null) return false
+    if (isNaN(lat) || isNaN(lng)) return false
+    // Если координаты равны Москве по умолчанию - считаем невалидными
+    if (Math.abs(lat - MOSCOW_LAT) < 0.001 && Math.abs(lng - MOSCOW_LNG) < 0.001) return false
+    return true
+  }
+  
+  const hasPickupCoords = isValidCoord(pLat, pLng)
+  const hasDropoffCoords = isValidCoord(dLat, dLng)
+  
+  console.log('Coordinates:', { 
+    pickup: [pLat, pLng], 
+    dropoff: [dLat, dLng],
+    hasPickup: hasPickupCoords,
+    hasDropoff: hasDropoffCoords
+  })
+  
+  // Если есть обе координаты - ставим метки
+  if (hasPickupCoords && hasDropoffCoords) {
+    addRouteMarkers([pLat, pLng], [dLat, dLng])
+    
+    // Центрируем карту по середине
+    const centerLat = (pLat + dLat) / 2
+    const centerLng = (pLng + dLng) / 2
+    mapInstance.value.setCenter([centerLat, centerLng], 14)
+    return
+  }
+  
+  // Если нет координат - используем геокодирование адресов
+  console.log('Using address geocoding')
+  
+  // Геокодируем оба адреса параллельно
+  Promise.all([
+    pickup_address ? window.ymaps.geocode(pickup_address) : Promise.resolve(null),
+    dropoff_address ? window.ymaps.geocode(dropoff_address) : Promise.resolve(null)
+  ]).then(([pickupRes, dropoffRes]) => {
+    let pickupCoords = null
+    let dropoffCoords = null
+    
+    // Получаем координаты подачи
+    if (pickupRes) {
+      try {
+        const first = pickupRes.geoObjects.get(0)
+        if (first) {
+          pickupCoords = first.geometry.getCoordinates()
+          console.log('Geocoded pickup to:', pickupCoords)
+        }
+      } catch(e) {
+        console.error('Error getting pickup coords:', e)
+      }
+    }
+        
+    // Получаем координаты назначения
+    if (dropoffRes) {
+      try {
+        const second = dropoffRes.geoObjects.get(0)
+        if (second) {
+          dropoffCoords = second.geometry.getCoordinates()
+          console.log('Geocoded dropoff to:', dropoffCoords)
+        }
+      } catch(e) {
+        console.error('Error getting dropoff coords:', e)
+      }
+    }
+    
+    // Добавляем метки если координаты найдены
+    if (pickupCoords || dropoffCoords) {
+      addRouteMarkers(pickupCoords, dropoffCoords)
+      
+      // Центрируем карту
+      if (pickupCoords && dropoffCoords) {
+        const centerLat = (pickupCoords[0] + dropoffCoords[0]) / 2
+        const centerLng = (pickupCoords[1] + dropoffCoords[1]) / 2
+        mapInstance.value.setCenter([centerLat, centerLng], 14)
+      } else if (pickupCoords) {
+        mapInstance.value.setCenter(pickupCoords, 14)
+      } else if (dropoffCoords) {
+        mapInstance.value.setCenter(dropoffCoords, 14)
+      }
+    }
+  }).catch((error) => {
+    console.error('Geocoding error:', error)
+  })
+}
+  
+// Добавление меток маршрута
+const addRouteMarkers = (pickupCoords, dropoffCoords) => {
+  if (!mapInstance.value || !window.ymaps) return
+  
+  console.log('Adding route markers:', { pickupCoords, dropoffCoords })
+  
+  // Проверяем что координаты валидные
+  const validPickup = pickupCoords && Array.isArray(pickupCoords) && pickupCoords.length === 2 && 
+                      !isNaN(pickupCoords[0]) && !isNaN(pickupCoords[1])
+  const validDropoff = dropoffCoords && Array.isArray(dropoffCoords) && dropoffCoords.length === 2 && 
+                       !isNaN(dropoffCoords[0]) && !isNaN(dropoffCoords[1])
+  
+  if (!validPickup && !validDropoff) {
+    console.warn('No valid coordinates for markers')
+    return
+  }
+  
+  // Если координаты одинаковые - ставим один круг
+  if (validPickup && validDropoff && 
+      Math.abs(pickupCoords[0] - dropoffCoords[0]) < 0.0001 && 
+      Math.abs(pickupCoords[1] - dropoffCoords[1]) < 0.0001) {
+    console.log('Coordinates are the same, placing single circle')
+    try {
+      const circle = new window.ymaps.Circle(
+        [pickupCoords, 10],  // [центр, радиус]
+        {
+          fillColor: '#3b82f680',
+          strokeColor: '#3b82f6',
+          strokeWidth: 2
+        }
+      )
+      circle.properties.set('balloonContent', `<strong>Заказ</strong><br>Подача: ${orderRouteData.value?.pickup_address || ''}<br>Назначение: ${orderRouteData.value?.dropoff_address || ''}`)
+      mapInstance.value.geoObjects.add(circle)
+    } catch(e) {
+      console.error('Error adding single circle:', e)
+    }
+    return
+  }
+  
+  // Метка подачи (зелёный круг)
+  if (validPickup) {
+    try {
+      const pickupCircle = new window.ymaps.Circle(
+        [pickupCoords, 10],  // [центр, радиус]
+        {
+          fillColor: '#22c55e80',
+          strokeColor: '#22c55e',
+          strokeWidth: 2
+        }
+      )
+      pickupCircle.properties.set('balloonContent', `<strong>Подача</strong><br>${orderRouteData.value?.pickup_address || ''}`)
+      mapInstance.value.geoObjects.add(pickupCircle)
+      console.log('✓ Added pickup circle at:', pickupCoords)
+    } catch(e) {
+      console.error('Error adding pickup circle:', e)
+    }
+  }
+  
+  // Метка назначения (красный круг)
+  if (validDropoff) {
+    try {
+      const dropoffCircle = new window.ymaps.Circle(
+        [dropoffCoords, 10],  // [центр, радиус]
+        {
+          fillColor: '#ef444480',
+          strokeColor: '#ef4444',
+          strokeWidth: 2
+        }
+      )
+      dropoffCircle.properties.set('balloonContent', `<strong>Назначение</strong><br>${orderRouteData.value?.dropoff_address || ''}`)
+      mapInstance.value.geoObjects.add(dropoffCircle)
+      console.log('✓ Added dropoff circle at:', dropoffCoords)
+    } catch(e) {
+      console.error('Error adding dropoff circle:', e)
+    }
+  }
+}
+
 // Переключение фильтров
 const toggleFilter = (filter) => {
   filters.value[filter] = !filters.value[filter]
   updateDriverPlacemarks()
   updateOrderPlacemarks()
+}
+
+// Скрыть маршрут заказа
+const hideOrderRoute = () => {
+  showOrderRoute.value = false
 }
 
 // Polling для обновления данных
@@ -303,6 +519,8 @@ onUnmounted(() => {
   if (mapInstance.value) {
     try { mapInstance.value.destroy() } catch(e) {}
   }
+  // Очищаем sessionStorage
+  sessionStorage.removeItem('orderRoute')
 })
 </script>
 
@@ -310,8 +528,20 @@ onUnmounted(() => {
   <DispatcherLayout activeTab="map">
     <!-- Page Header -->
     <div class="mb-4 flex items-center justify-between">
-      <h1 class="text-2xl font-bold text-white">Карта</h1>
+      <div class="flex items-center gap-4">
+        <h1 class="text-2xl font-bold text-white">Карта</h1>
+        <div v-if="orderRouteData" class="rounded-lg bg-blue-600/20 px-3 py-1.5 text-sm text-blue-400">
+          🚗 Маршрут: {{ orderRouteData.order_number }}
+        </div>
+      </div>
       <div class="flex gap-2">
+        <button
+          v-if="orderRouteData"
+          @click="hideOrderRoute"
+          class="rounded-lg bg-red-600 px-3 py-2 text-sm text-white transition hover:bg-red-700"
+        >
+          ✕ Скрыть маршрут
+        </button>
         <button
           @click="showFilters = !showFilters"
           :class="[

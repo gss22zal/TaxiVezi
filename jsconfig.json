@@ -1,9 +1,16 @@
 {
     "compilerOptions": {
         "baseUrl": ".",
+        "target": "es2017",
+        "lib": ["dom", "dom.iterable", "esnext"],
+        "esModuleInterop": true,
+        "module": "esnext",
+        "moduleResolution": "node",
+        "typeRoots": ["./node_modules/@types", "./node_modules/@yandex/ymaps3-types"],
         "paths": {
             "@/*": ["resources/js/*"],
-            "ziggy-js": ["./vendor/tightenco/ziggy"]
+            "ziggy-js": ["./vendor/tightenco/ziggy"],
+            "ymaps3": ["./node_modules/@yandex/ymaps3-types"]
         }
     },
     "exclude": ["node_modules", "public"]
